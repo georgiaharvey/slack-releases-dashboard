@@ -60,6 +60,8 @@ const SlackReleasesDashboard = () => {
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
+      timeZone: 'UTC',
+      timeZoneName: 'short'
     });
   };
 
@@ -216,39 +218,44 @@ const SlackReleasesDashboard = () => {
                         </div>
                       </div>
                       <div className="flex space-x-2">
-                        {release.screenshotLink && (
-                          <a
-                            href={release.screenshotLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                          >
-                            <Image className="w-4 h-4" />
-                          </a>
-                        )}
-                        <a
-                          href={release.slackLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                          <Link className="w-4 h-4" />
-                        </a>
-                      </div>
-                    </div>
-                    
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3">
-                      {release.mainMessage}
-                    </h3>
-                    
-                    {release.detailedNotes && (
-                      <p className="text-gray-700 leading-relaxed">
-                        {release.detailedNotes}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
+  {release.screenshotLink && release.screenshotLink !== 'null' && !release.screenshotLink.includes('example.com') && (
+    
+      href={release.screenshotLink}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+      title="View Screenshot"
+    >
+      <Image className="w-4 h-4" />
+    </a>
+  )}
+  {release.slackLink && release.slackLink !== 'null' && !release.slackLink.includes('example.com') && (
+    
+      href={release.slackLink}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+      title="View in Slack"
+    >
+      <Link className="w-4 h-4" />
+    </a>
+  )}
+</div>                    
+                   <div className="space-y-3">
+  <h3 className="text-lg font-semibold text-gray-900">
+    {release.mainMessage && release.mainMessage.length > 100 
+      ? release.mainMessage.substring(0, 100) + '...' 
+      : release.mainMessage}
+  </h3>
+  
+  {release.detailedNotes && (
+    <div className="text-gray-700 leading-relaxed">
+      <div className="whitespace-pre-wrap break-words">
+        {release.detailedNotes}
+      </div>
+    </div>
+  )}
+</div>
               
               {filteredReleases.length === 0 && (
                 <div className="text-center py-12">
