@@ -49,13 +49,8 @@ const SlackReleasesDashboard = () => {
   }, []);
 
   useEffect(() => {
-    const filtered = releases.filter(release =>
-      release.mainMessage.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.sender.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.detailedNotes.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    setFilteredReleases(filtered);
-  }, [searchTerm, releases]);
+  fetchGoogleSheetsData(); // Remove mock data, use real data
+}, []);
 
   const formatTimestamp = (timestamp) => {
     const date = new Date(parseInt(timestamp) * 1000);
@@ -94,11 +89,36 @@ const SlackReleasesDashboard = () => {
   };
 
   const fetchGoogleSheetsData = async () => {
-    setLoading(true);
-    // TODO: Replace with actual Google Sheets API call
-    // const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/september?key=${API_KEY}`);
-    setTimeout(() => setLoading(false), 1000);
-  };
+  setLoading(true);
+  try {
+    const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
+    const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
+    const WORKSHEET = process.env.REACT_APP_WORKSHEET_NAME || 'september';
+    
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.values) {
+      const [headers, ...rows] = data.values;
+      const formattedData = rows.map((row, index) => ({
+        id: index + 1,
+        timestamp: row[0] || '', // Assuming timestamp is column A
+        sender: row[1] || 'Unknown', // Assuming sender is column B
+        mainMessage: row[2] || '', // Assuming message is column C
+        detailedNotes: row[3] || '',
+        screenshotLink: row[4] || null,
+        slackLink: row[5] || ''
+      }));
+      
+      setReleases(formattedData);
+      setFilteredReleases(formattedData);
+    }
+  } catch (error) {
+    console.error('Error fetching Google Sheets data:', error);
+  }
+  setLoading(false);
+};
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
