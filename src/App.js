@@ -47,17 +47,24 @@ const SlackReleasesDashboard = () => {
 }, []);
 
   const formatTimestamp = (timestamp) => {
-    const date = new Date(parseInt(timestamp) * 1000);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-      timeZone: 'UTC',
-      timeZoneName: 'short'
-    });
-  };
+  // Convert Unix timestamp to date
+  let ts = parseInt(timestamp);
+  // Handle both seconds and milliseconds timestamps
+  if (ts > 10000000000) {
+    ts = ts / 1000;
+  }
+  
+  const date = new Date(ts * 1000);
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+    timeZoneName: 'short'
+  }) + ' UTC';
+};
 
   const handleGeminiQuery = async (message) => {
     setGeminiLoading(true);
