@@ -43,13 +43,7 @@ const SlackReleasesDashboard = () => {
   ];
 
   useEffect(() => {
-    // Initialize with mock data - replace with actual Google Sheets fetch
-    setReleases(mockData);
-    setFilteredReleases(mockData);
-  }, []);
-
-  useEffect(() => {
-  fetchGoogleSheetsData(); // Remove mock data, use real data
+  fetchGoogleSheetsData(); // Load real data on startup
 }, []);
 
   const formatTimestamp = (timestamp) => {
