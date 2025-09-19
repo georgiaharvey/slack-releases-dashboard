@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, Filter, RefreshCw } from 'lucide-react';
 
 const SlackReleasesDashboard = () => {
+  const SlackReleasesDashboard = () => {
+  // DEBUG - Check environment variables
+  console.log('=== ENVIRONMENT CHECK ===');
+  console.log('API Key:', process.env.REACT_APP_GOOGLE_SHEETS_API_KEY ? 'EXISTS' : 'MISSING');
+  console.log('Sheet ID:', process.env.REACT_APP_GOOGLE_SHEET_ID ? 'EXISTS' : 'MISSING');
+  console.log('Worksheet:', process.env.REACT_APP_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
+  
+  const [releases, setReleases] = useState([]);
   const [releases, setReleases] = useState([]);
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,8 +48,9 @@ const SlackReleasesDashboard = () => {
     }
   ];
 
-  useEffect(() => {
-  fetchGoogleSheetsData(); // Load real data on startup
+useEffect(() => {
+  console.log('Component mounted, fetching Google Sheets data...');
+  fetchGoogleSheetsData();
 }, []);
 
   const formatTimestamp = (timestamp) => {
@@ -87,22 +96,29 @@ const SlackReleasesDashboard = () => {
   };
 
   const fetchGoogleSheetsData = async () => {
+  console.log('fetchGoogleSheetsData called');
   setLoading(true);
+  
   try {
     const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
     const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
     const WORKSHEET = process.env.REACT_APP_WORKSHEET_NAME || 'september';
     
+    console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
+    
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
-    console.log('Fetching from:', url); // Debug log
+    console.log('Fetching URL:', url);
     
     const response = await fetch(url);
     const data = await response.json();
     
-    console.log('API Response:', data); // Debug log
+    console.log('Google Sheets Response:', data);
     
     if (data.values && data.values.length > 1) {
       const [headers, ...rows] = data.values;
+      console.log('Headers:', headers);
+      console.log('Rows:', rows);
+      
       const formattedData = rows.map((row, index) => ({
         id: index + 1,
         timestamp: row[0] || '',
@@ -113,13 +129,16 @@ const SlackReleasesDashboard = () => {
         slackLink: row[5] && row[5] !== 'null' ? row[5] : null
       }));
       
-      console.log('Formatted data:', formattedData); // Debug log
+      console.log('Formatted data:', formattedData);
       setReleases(formattedData);
       setFilteredReleases(formattedData);
+    } else {
+      console.log('No data found or empty response');
     }
   } catch (error) {
     console.error('Error fetching Google Sheets data:', error);
   }
+  
   setLoading(false);
 };
 
