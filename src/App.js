@@ -11,8 +11,6 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
-  // Mock data for demo - replace with Google Sheets API
-  const mockData = [
     {
       id: 1,
       timestamp: '1726677661',
@@ -47,15 +45,12 @@ const SlackReleasesDashboard = () => {
 }, []);
 
   const formatTimestamp = (timestamp) => {
-  // Convert Unix timestamp to date
   let ts = parseInt(timestamp);
-  // Handle both seconds and milliseconds timestamps
-  if (ts > 10000000000) {
-    ts = ts / 1000;
-  }
   
+  // Slack timestamps are in seconds, convert to milliseconds
   const date = new Date(ts * 1000);
-  return date.toLocaleDateString('en-US', {
+  
+  return date.toLocaleString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -63,7 +58,7 @@ const SlackReleasesDashboard = () => {
     minute: '2-digit',
     timeZone: 'UTC',
     timeZoneName: 'short'
-  }) + ' UTC';
+  });
 };
 
   const handleGeminiQuery = async (message) => {
@@ -99,21 +94,26 @@ const SlackReleasesDashboard = () => {
     const WORKSHEET = process.env.REACT_APP_WORKSHEET_NAME || 'september';
     
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
+    console.log('Fetching from:', url); // Debug log
+    
     const response = await fetch(url);
     const data = await response.json();
     
-    if (data.values) {
+    console.log('API Response:', data); // Debug log
+    
+    if (data.values && data.values.length > 1) {
       const [headers, ...rows] = data.values;
       const formattedData = rows.map((row, index) => ({
         id: index + 1,
-        timestamp: row[0] || '', // Assuming timestamp is column A
-        sender: row[1] || 'Unknown', // Assuming sender is column B
-        mainMessage: row[2] || '', // Assuming message is column C
+        timestamp: row[0] || '',
+        sender: row[1] || 'Unknown',
+        mainMessage: row[2] || '',
         detailedNotes: row[3] || '',
-        screenshotLink: row[4] || null,
-        slackLink: row[5] || ''
+        screenshotLink: row[4] && row[4] !== 'null' ? row[4] : null,
+        slackLink: row[5] && row[5] !== 'null' ? row[5] : null
       }));
       
+      console.log('Formatted data:', formattedData); // Debug log
       setReleases(formattedData);
       setFilteredReleases(formattedData);
     }
