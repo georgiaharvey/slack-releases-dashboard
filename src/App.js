@@ -2,14 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, Filter, RefreshCw } from 'lucide-react';
 
 const SlackReleasesDashboard = () => {
-  const SlackReleasesDashboard = () => {
   // DEBUG - Check environment variables
   console.log('=== ENVIRONMENT CHECK ===');
   console.log('API Key:', process.env.REACT_APP_GOOGLE_SHEETS_API_KEY ? 'EXISTS' : 'MISSING');
   console.log('Sheet ID:', process.env.REACT_APP_GOOGLE_SHEET_ID ? 'EXISTS' : 'MISSING');
   console.log('Worksheet:', process.env.REACT_APP_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
   
-  const [releases, setReleases] = useState([]);
   const [releases, setReleases] = useState([]);
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,56 +17,36 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
-    {
-      id: 1,
-      timestamp: '1726677661',
-      sender: 'niall.cochrane',
-      mainMessage: 'Released version 2.1.4 with critical bug fixes for authentication system',
-      detailedNotes: 'This release addresses the login timeout issues reported by multiple users. Also includes performance improvements for the dashboard.',
-      screenshotLink: 'https://example.com/screenshot1.png',
-      slackLink: 'https://slack.com/archives/C123/p1726677661'
-    },
-    {
-      id: 2,
-      timestamp: '1726591261',
-      sender: 'sarah.dev',
-      mainMessage: 'Mobile app update v3.2.0 now available on app stores',
-      detailedNotes: 'New features include dark mode, push notifications, and improved offline sync. iOS and Android versions are now live.',
-      screenshotLink: 'https://example.com/screenshot2.png',
-      slackLink: 'https://slack.com/archives/C123/p1726591261'
-    },
-    {
-      id: 3,
-      timestamp: '1726504861',
-      sender: 'mike.qa',
-      mainMessage: 'API v2 documentation updated with new endpoints',
-      detailedNotes: 'Added comprehensive examples for the new user management and reporting endpoints. Breaking changes are clearly marked.',
-      screenshotLink: null,
-      slackLink: 'https://slack.com/archives/C123/p1726504861'
-    }
-  ];
+  useEffect(() => {
+    console.log('Component mounted, fetching Google Sheets data...');
+    fetchGoogleSheetsData();
+  }, []);
 
-useEffect(() => {
-  console.log('Component mounted, fetching Google Sheets data...');
-  fetchGoogleSheetsData();
-}, []);
+  useEffect(() => {
+    const filtered = releases.filter(release =>
+      release.mainMessage.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      release.sender.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      release.detailedNotes.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    setFilteredReleases(filtered);
+  }, [searchTerm, releases]);
 
   const formatTimestamp = (timestamp) => {
-  let ts = parseInt(timestamp);
-  
-  // Slack timestamps are in seconds, convert to milliseconds
-  const date = new Date(ts * 1000);
-  
-  return date.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'UTC',
-    timeZoneName: 'short'
-  });
-};
+    let ts = parseInt(timestamp);
+    
+    // Slack timestamps are in seconds, convert to milliseconds
+    const date = new Date(ts * 1000);
+    
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'UTC',
+      timeZoneName: 'short'
+    });
+  };
 
   const handleGeminiQuery = async (message) => {
     setGeminiLoading(true);
@@ -77,7 +55,7 @@ useEffect(() => {
     try {
       // Mock Gemini response - replace with actual Gemini API call
       await new Promise(resolve => setTimeout(resolve, 1500));
-      const mockResponse = `Based on your release data, I can see that you've had 3 recent releases. The most recent was version 2.1.4 by ${releases[0]?.sender} focusing on authentication fixes. Your team seems to be actively addressing user-reported issues and maintaining both web and mobile platforms. Is there something specific about these releases you'd like me to analyze?`;
+      const mockResponse = `Based on your release data, I can see that you've had ${releases.length} recent releases. Is there something specific about these releases you'd like me to analyze?`;
       
       setChatMessages(prev => [...prev, { role: 'assistant', content: mockResponse }]);
     } catch (error) {
@@ -89,58 +67,57 @@ useEffect(() => {
   };
 
   const handleSendMessage = (e) => {
-    e.preventDefault();
     if (currentMessage.trim()) {
       handleGeminiQuery(currentMessage.trim());
     }
   };
 
   const fetchGoogleSheetsData = async () => {
-  console.log('fetchGoogleSheetsData called');
-  setLoading(true);
-  
-  try {
-    const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
-    const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
-    const WORKSHEET = process.env.REACT_APP_WORKSHEET_NAME || 'september';
+    console.log('fetchGoogleSheetsData called');
+    setLoading(true);
     
-    console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
-    
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
-    console.log('Fetching URL:', url);
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    console.log('Google Sheets Response:', data);
-    
-    if (data.values && data.values.length > 1) {
-      const [headers, ...rows] = data.values;
-      console.log('Headers:', headers);
-      console.log('Rows:', rows);
+    try {
+      const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
+      const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
+      const WORKSHEET = process.env.REACT_APP_WORKSHEET_NAME || 'september';
       
-      const formattedData = rows.map((row, index) => ({
-        id: index + 1,
-        timestamp: row[0] || '',
-        sender: row[1] || 'Unknown',
-        mainMessage: row[2] || '',
-        detailedNotes: row[3] || '',
-        screenshotLink: row[4] && row[4] !== 'null' ? row[4] : null,
-        slackLink: row[5] && row[5] !== 'null' ? row[5] : null
-      }));
+      console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
       
-      console.log('Formatted data:', formattedData);
-      setReleases(formattedData);
-      setFilteredReleases(formattedData);
-    } else {
-      console.log('No data found or empty response');
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
+      console.log('Fetching URL:', url);
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      console.log('Google Sheets Response:', data);
+      
+      if (data.values && data.values.length > 1) {
+        const [headers, ...rows] = data.values;
+        console.log('Headers:', headers);
+        console.log('Rows:', rows);
+        
+        const formattedData = rows.map((row, index) => ({
+          id: index + 1,
+          timestamp: row[0] || '',
+          sender: row[1] || 'Unknown',
+          mainMessage: row[2] || '',
+          detailedNotes: row[3] || '',
+          screenshotLink: row[4] && row[4] !== 'null' ? row[4] : null,
+          slackLink: row[5] && row[5] !== 'null' ? row[5] : null
+        }));
+        
+        console.log('Formatted data:', formattedData);
+        setReleases(formattedData);
+        setFilteredReleases(formattedData);
+      } else {
+        console.log('No data found or empty response');
+      }
+    } catch (error) {
+      console.error('Error fetching Google Sheets data:', error);
     }
-  } catch (error) {
-    console.error('Error fetching Google Sheets data:', error);
-  }
-  
-  setLoading(false);
-};
+    
+    setLoading(false);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -238,44 +215,49 @@ useEffect(() => {
                         </div>
                       </div>
                       <div className="flex space-x-2">
-  {release.screenshotLink && release.screenshotLink !== 'null' && !release.screenshotLink.includes('example.com') && (
-    
-      href={release.screenshotLink}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-      title="View Screenshot"
-    >
-      <Image className="w-4 h-4" />
-    </a>
-  )}
-  {release.slackLink && release.slackLink !== 'null' && !release.slackLink.includes('example.com') && (
-    
-      href={release.slackLink}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-      title="View in Slack"
-    >
-      <Link className="w-4 h-4" />
-    </a>
-  )}
-</div>                    
-                   <div className="space-y-3">
-  <h3 className="text-lg font-semibold text-gray-900">
-    {release.mainMessage && release.mainMessage.length > 100 
-      ? release.mainMessage.substring(0, 100) + '...' 
-      : release.mainMessage}
-  </h3>
-  
-  {release.detailedNotes && (
-    <div className="text-gray-700 leading-relaxed">
-      <div className="whitespace-pre-wrap break-words">
-        {release.detailedNotes}
-      </div>
-    </div>
-  )}
-</div>
+                        {release.screenshotLink && release.screenshotLink !== 'null' && !release.screenshotLink.includes('example.com') && (
+                          
+                            href={release.screenshotLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="View Screenshot"
+                          >
+                            <Image className="w-4 h-4" />
+                          </a>
+                        )}
+                        {release.slackLink && release.slackLink !== 'null' && !release.slackLink.includes('example.com') && (
+                          
+                            href={release.slackLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="View in Slack"
+                          >
+                            <Link className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {release.mainMessage && release.mainMessage.length > 100 
+                          ? release.mainMessage.substring(0, 100) + '...' 
+                          : release.mainMessage}
+                      </h3>
+                      
+                      {release.detailedNotes && (
+                        <div className="text-gray-700 leading-relaxed">
+                          <div className="whitespace-pre-wrap break-words">
+                            {release.detailedNotes}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
               
               {filteredReleases.length === 0 && (
                 <div className="text-center py-12">
