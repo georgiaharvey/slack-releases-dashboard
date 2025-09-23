@@ -33,8 +33,6 @@ const SlackReleasesDashboard = () => {
 
   const formatTimestamp = (timestamp) => {
     let ts = parseInt(timestamp);
-    
-    // Slack timestamps are in seconds, convert to milliseconds
     const date = new Date(ts * 1000);
     
     return date.toLocaleString('en-US', {
@@ -53,7 +51,6 @@ const SlackReleasesDashboard = () => {
     setChatMessages(prev => [...prev, { role: 'user', content: message }]);
     
     try {
-      // Mock Gemini response - replace with actual Gemini API call
       await new Promise(resolve => setTimeout(resolve, 1500));
       const mockResponse = `Based on your release data, I can see that you've had ${releases.length} recent releases. Is there something specific about these releases you'd like me to analyze?`;
       
@@ -66,7 +63,7 @@ const SlackReleasesDashboard = () => {
     setCurrentMessage('');
   };
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = () => {
     if (currentMessage.trim()) {
       handleGeminiQuery(currentMessage.trim());
     }
@@ -121,7 +118,6 @@ const SlackReleasesDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
@@ -152,9 +148,7 @@ const SlackReleasesDashboard = () => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex gap-8">
-          {/* Main Content */}
           <div className={`flex-1 ${showChat ? 'mr-0' : ''}`}>
-            {/* Search Bar */}
             <div className="mb-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -168,7 +162,6 @@ const SlackReleasesDashboard = () => {
               </div>
             </div>
 
-            {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center">
@@ -199,7 +192,6 @@ const SlackReleasesDashboard = () => {
               </div>
             </div>
 
-            {/* Release Cards */}
             <div className="space-y-6">
               {filteredReleases.map((release) => (
                 <div key={release.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
@@ -268,7 +260,6 @@ const SlackReleasesDashboard = () => {
             </div>
           </div>
 
-          {/* Gemini Chat Sidebar */}
           {showChat && (
             <div className="w-96 bg-white rounded-xl shadow-sm border border-slate-200 h-fit">
               <div className="p-4 border-b border-slate-200">
@@ -321,7 +312,7 @@ const SlackReleasesDashboard = () => {
                     onChange={(e) => setCurrentMessage(e.target.value)}
                     placeholder="Ask about your releases..."
                     disabled={geminiLoading}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage(e)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
                   />
                   <button
