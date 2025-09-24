@@ -5,8 +5,8 @@ const SlackReleasesDashboard = () => {
   console.log('=== ENVIRONMENT CHECK ===');
   console.log('API Key:', process.env.REACT_APP_GOOGLE_SHEETS_API_KEY ? 'EXISTS' : 'MISSING');
   console.log('Sheet ID:', process.env.REACT_APP_GOOGLE_SHEET_ID ? 'EXISTS' : 'MISSING');
-  console.log('Worksheet:', process.env.REACT_APP_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
-  
+  console.log('Worksheet:', process.env.REACT_APP_GOOGLE_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
+
   const [releases, setReleases] = useState([]);
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -16,20 +16,52 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
+  // --- Improved cleaning of Slack markup for display ---
   const cleanSlackText = (text) => {
-    if (!text) return text;
-    
+    if (!text) return '';
+
     let cleaned = text;
-    cleaned = cleaned.replace(/:[^:\s]*:/g, ''); // emojis
-    cleaned = cleaned.replace(/<[@#][^>]+>/g, ''); // mentions
-    cleaned = cleaned.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1'); // bold
-    cleaned = cleaned.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).join('\n');
-    cleaned = cleaned.replace(/^[\s]*[•·▪▫◦‣⁃][\s]*/gm, '• ');
-    cleaned = cleaned.replace(/^[\s]*[-*][\s]+/gm, '• ');
-    
+
+    // 1) Convert Slack-style links: <https://url|Label> -> Label, <https://url> -> https://url
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2'); // <url|label> -> label
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1'); // <url> -> url
+
+    // 2) Channel mentions <#C12345|channel> -> #channel
+    cleaned = cleaned.replace(/<#\w+\|([^>]+)>/g, '#$1');
+
+    // 3) User mentions <@U12345> -> @user (or remove if you prefer)
+    cleaned = cleaned.replace(/<@[^>]+>/g, '@user');
+
+    // 4) Remove Slack emoji shortcodes like :wave:
+    cleaned = cleaned.replace(/:[a-zA-Z0-9_+\-]+:/g, '');
+
+    // 5) Remove code blocks and inline code
+    cleaned = cleaned.replace(/```[\s\S]*?```/g, ''); // remove fenced blocks
+    cleaned = cleaned.replace(/`([^`]+)`/g, '$1'); // inline code
+
+    // 6) Remove markdown bold/italic markers but keep text
+    cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1'); // **bold**
+    cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');     // *italic or single *
+    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');           // _italic_
+
+    // 7) Normalize bullet markers (-, *, •) to • and ensure they start a line cleanly
+    // Convert common ASCII bullets to a single bullet char
+    cleaned = cleaned.replace(/^[\s]*[-\*]\s+/gm, '• ');
+    cleaned = cleaned.replace(/^[\s]*[•·▪▫◦‣⁃]\s*/gm, '• ');
+
+    // 8) Trim each line of extra spaces but preserve paragraph breaks:
+    // We split on single newlines, trim each line, then join with two newlines so browser's whitespace-pre-line
+    // renders paragraphs with spacing.
+    cleaned = cleaned
+      .split('\n')
+      .map(line => line.replace(/\s+/g, ' ').trim())
+      .filter((line) => line !== '') // remove stray blank lines
+      .join('\n\n');
+
     return cleaned.trim();
   };
 
+  // preserve previous link extraction behavior (returns array of URLs)
   const extractLinks = (text) => {
     if (!text) return [];
     const urlMatches = text.match(/<?(https?:\/\/[^\s>]+)>?/g);
@@ -37,23 +69,17 @@ const SlackReleasesDashboard = () => {
     return urlMatches.map(match => match.replace(/[<>]/g, ''));
   };
 
-  // ✅ improved filter (Option 2)
-  const isLikelyReply = (messageText, detailedText) => {
-    if (!messageText) return false; 
-    const trimmed = messageText.trim().toLowerCase();
+  // NEW: Only treat a message as a "reply-to-skip" when the main message is < 20 characters AND there are no detailed notes.
+  // This is the single filtering criterion you asked for.
+  const isTooShortToShow = (messageText, detailedText) => {
+    const main = (messageText || '').trim();
+    const details = (detailedText || '').trim();
 
-    // Only drop if extremely short AND no detailed notes
-    if (trimmed.length < 5 && !detailedText) return true;
+    // If main message length is less than 20 and there are no detailed notes, skip it.
+    if (main.length > 0 && main.length < 20 && details.length === 0) return true;
 
-    const replyPhrases = ['thanks', 'thank you', 'ok', 'okay', 'done', 'fixed', 'approved'];
-    return replyPhrases.includes(trimmed);
-  };
-
-  const formatSenderName = (rawName) => {
-    if (!rawName) return 'Unknown';
-    const name = rawName.trim();
-    if (name.includes('@')) return name.split('@')[0]; // handle emails
-    return name.replace(/\./g, ' '); // replace dots with spaces
+    // Keep everything else
+    return false;
   };
 
   useEffect(() => {
@@ -63,31 +89,33 @@ const SlackReleasesDashboard = () => {
 
   useEffect(() => {
     const filtered = releases.filter(release =>
-      release.mainMessage.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.sender.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.detailedNotes.toLowerCase().includes(searchTerm.toLowerCase())
+      (release.mainMessage || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (release.sender || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (release.detailedNotes || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
     setFilteredReleases(filtered);
   }, [searchTerm, releases]);
 
   const formatTimestamp = (timestamp) => {
-    let ts = parseInt(timestamp);
-    const date = new Date(ts * 1000);
+    if (!timestamp) return '';
+    // handle both unix seconds and ISO strings
+    let date;
+    if (/^\d+$/.test(String(timestamp))) {
+      const ts = parseInt(timestamp, 10);
+      date = new Date(ts * 1000);
+    } else {
+      date = new Date(timestamp);
+    }
+    if (isNaN(date.getTime())) return timestamp;
     return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'UTC',
-      timeZoneName: 'short'
+      year: 'numeric', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short'
     });
   };
 
   const handleGeminiQuery = async (message) => {
     setGeminiLoading(true);
     setChatMessages(prev => [...prev, { role: 'user', content: message }]);
-    
     try {
       await new Promise(resolve => setTimeout(resolve, 1500));
       const mockResponse = `Based on your release data, I can see ${releases.length} releases. What would you like to know about them?`;
@@ -95,7 +123,6 @@ const SlackReleasesDashboard = () => {
     } catch (error) {
       setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
     }
-    
     setGeminiLoading(false);
     setCurrentMessage('');
   };
@@ -109,61 +136,72 @@ const SlackReleasesDashboard = () => {
   const fetchGoogleSheetsData = async () => {
     console.log('fetchGoogleSheetsData called');
     setLoading(true);
-    
+
     try {
       const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
       const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
-      const WORKSHEET = process.env.REACT_APP_WORKSHEET_NAME || 'september';
-      
+      const WORKSHEET = process.env.REACT_APP_GOOGLE_SHEET_NAME || process.env.REACT_APP_GOOGLE_SHEETS_WORKSHEET || 'september';
+
       console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
+
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
       console.log('Fetching URL:', url);
-      
+
       const response = await fetch(url);
       const data = await response.json();
+
       console.log('Google Sheets Response:', data);
-      
+
       if (data.values && data.values.length > 1) {
         const [headers, ...rows] = data.values;
         console.log('Headers:', headers);
-        console.log('Rows:', rows);
-        
+        console.log('Rows count:', rows.length);
+
         const formattedData = rows.map((row, index) => {
           const messageText = row[2] || '';
           const detailedText = row[3] || '';
 
-          if (isLikelyReply(messageText, detailedText)) {
-            console.log(`Skipping reply-like message: ${messageText}`);
+          // ONLY skip when message is too short and there are no detailed notes
+          if (isTooShortToShow(messageText, detailedText)) {
+            console.log(`Skipping short message at row ${index + 1}: "${String(messageText).slice(0, 80)}"`);
             return null;
           }
 
           const item = {
             id: index + 1,
             timestamp: row[0] || '',
-            sender: formatSenderName(row[1] || 'Unknown'),
+            sender: row[1] || 'Unknown',
             mainMessage: cleanSlackText(messageText) || '',
             detailedNotes: cleanSlackText(detailedText) || '',
-            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' && row[4].trim() !== '' ? row[4].trim() : null,
-            slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' && row[5].trim() !== '' ? row[5].trim() : null,
-            extractedLinks: extractLinks((messageText || '') + ' ' + (detailedText || ''))
+            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' ? row[4].trim() : null,
+            slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' ? row[5].trim() : null,
+            extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
           };
 
-          console.log(`Keeping message ${index + 1} by ${item.sender}: ${item.mainMessage.substring(0, 50)}...`);
+          console.log(`Keeping message ${index + 1} by ${item.sender}: ${String(item.mainMessage).slice(0, 80)}...`);
           return item;
         }).filter(item => item !== null);
-        
-        const sortedData = formattedData.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
-        
+
+        const sortedData = formattedData.sort((a, b) => {
+          // sort by unix timestamp (if numeric) otherwise by date string
+          const aNum = parseInt(a.timestamp, 10);
+          const bNum = parseInt(b.timestamp, 10);
+          if (!isNaN(aNum) && !isNaN(bNum)) return bNum - aNum;
+          return new Date(b.timestamp) - new Date(a.timestamp);
+        });
+
         console.log('Formatted data:', sortedData);
         setReleases(sortedData);
         setFilteredReleases(sortedData);
       } else {
         console.log('No data found or empty response');
+        setReleases([]);
+        setFilteredReleases([]);
       }
     } catch (error) {
       console.error('Error fetching Google Sheets data:', error);
     }
-    
+
     setLoading(false);
   };
 
@@ -282,12 +320,14 @@ const SlackReleasesDashboard = () => {
                         )}
                       </div>
                     </div>
-                    
+
                     <div className="space-y-3">
-                      <h3 className="text-lg font-semibold text-gray-900">
+                      {/* MAIN MESSAGE: use normal font weight so it doesn't force-bold */}
+                      <h3 className="text-lg font-normal text-gray-900">
                         {release.mainMessage}
                       </h3>
-                      
+
+                      {/* DETAILED NOTES: whitespace-pre-line will respect paragraph breaks (\n\n) */}
                       {release.detailedNotes && (
                         <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words">
                           {release.detailedNotes}
@@ -317,7 +357,7 @@ const SlackReleasesDashboard = () => {
                   </div>
                 </div>
               ))}
-              
+
               {filteredReleases.length === 0 && (
                 <div className="text-center py-12">
                   <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -336,7 +376,7 @@ const SlackReleasesDashboard = () => {
                 </div>
                 <p className="text-sm text-gray-600 mt-1">Ask questions about your releases</p>
               </div>
-              
+
               <div className="h-96 overflow-y-auto p-4">
                 {chatMessages.length === 0 ? (
                   <div className="text-center text-gray-500 mt-8">
@@ -348,8 +388,8 @@ const SlackReleasesDashboard = () => {
                     {chatMessages.map((msg, idx) => (
                       <div key={idx} className={msg.role === 'user' ? 'ml-4' : 'mr-4'}>
                         <div className={`p-3 rounded-lg ${
-                          msg.role === 'user' 
-                            ? 'bg-blue-600 text-white ml-auto' 
+                          msg.role === 'user'
+                            ? 'bg-blue-600 text-white ml-auto'
                             : 'bg-gray-100 text-gray-900'
                         }`}>
                           <p className="text-sm">{msg.content}</p>
@@ -370,7 +410,7 @@ const SlackReleasesDashboard = () => {
                   </div>
                 )}
               </div>
-              
+
               <div className="p-4 border-t border-slate-200">
                 <div className="flex space-x-2">
                   <input
