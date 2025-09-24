@@ -33,18 +33,38 @@ const SlackReleasesDashboard = () => {
     // Replace channel mentions <#C12345|channel> → #channel
     cleaned = cleaned.replace(/<#[A-Z0-9]+\|([^>]+)>/g, '#$1');
     
-    // Replace user mentions <@U12345> → @user
+    // Replace user mentions <@U12345> → @user - but skip if it's at the start (likely a reply)
     cleaned = cleaned.replace(/<@([A-Z0-9]+)>/g, '@$1');
     
-    // Remove bold markdown - handle both **text** and *text*
-    cleaned = cleaned.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1');
+    // Remove ALL asterisk formatting more aggressively
+    // First remove **text**
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+    // Then remove *text*
+    cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+    // Remove any remaining stray asterisks
+    cleaned = cleaned.replace(/\*/g, '');
     
-    // Preserve line breaks but collapse multiple spaces on same line
-    cleaned = cleaned.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).join('\n');
+    // Split into lines for better processing
+    let lines = cleaned.split('\n');
     
-    // Preserve bullet points
-    cleaned = cleaned.replace(/^[\s]*[•·▪▫◦‣⁃][\s]*/gm, '• ');
-    cleaned = cleaned.replace(/^[\s]*[-*][\s]+/gm, '• ');
+    // Process each line
+    lines = lines.map(line => {
+      // Trim each line
+      line = line.trim();
+      
+      // Convert bullet points to consistent format
+      if (line.match(/^[•·▪▫◦‣⁃\-\*]/)) {
+        line = '• ' + line.replace(/^[•·▪▫◦‣⁃\-\*]\s*/, '');
+      }
+      
+      // Collapse multiple spaces within the line
+      line = line.replace(/\s+/g, ' ');
+      
+      return line;
+    });
+    
+    // Join lines back, removing empty lines but preserving paragraph breaks
+    cleaned = lines.filter(line => line.length > 0).join('\n');
     
     return cleaned.trim();
   };
@@ -155,30 +175,46 @@ const SlackReleasesDashboard = () => {
       if (data.values && data.values.length > 1) {
         const [headers, ...rows] = data.values;
         console.log('Headers:', headers);
-        console.log('Sample rows:', rows.slice(0, 3));
+        console.log('Total rows:', rows.length);
         
         const formattedData = rows.map((row, index) => {
+          // Skip if this appears to be a thread reply
+          // Thread replies often start with @mentions or are responses
+          const messageText = row[2] || '';
+          const detailedText = row[3] || '';
+          
+          // Skip messages that appear to be replies (start with @mention)
+          if (messageText.trim().startsWith('<@') || messageText.trim().startsWith('@')) {
+            console.log(`Skipping reply message at row ${index + 1}: ${messageText.substring(0, 50)}...`);
+            return null;
+          }
+          
           const item = {
             id: index + 1,
             timestamp: row[0] || '',
             sender: formatSenderName(row[1] || 'Unknown'),
-            mainMessage: cleanSlackText(row[2]) || '',
-            detailedNotes: cleanSlackText(row[3]) || '',
+            mainMessage: cleanSlackText(messageText) || '',
+            detailedNotes: cleanSlackText(detailedText) || '',
             screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' && row[4].trim() !== '' ? row[4].trim() : null,
             slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' && row[5].trim() !== '' ? row[5].trim() : null,
-            extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
+            extractedLinks: extractLinks((messageText || '') + ' ' + (detailedText || ''))
           };
+          
+          // Additional filter: skip if the main message is too short (likely not a release announcement)
+          if (item.mainMessage.length < 10 && !item.detailedNotes) {
+            console.log(`Skipping short message at row ${index + 1}: ${item.mainMessage}`);
+            return null;
+          }
           
           // Debug logging for icon display
           console.log(`Message ${index + 1} by ${item.sender}:`, {
             screenshotLink: item.screenshotLink ? 'YES' : 'NO',
             slackLink: item.slackLink ? 'YES' : 'NO',
-            rawScreenshot: row[4],
-            rawSlack: row[5]
+            mainMessage: item.mainMessage.substring(0, 50) + '...'
           });
           
           return item;
-        });
+        }).filter(item => item !== null); // Remove null entries
         
         const sortedData = formattedData.sort((a, b) => {
           // If timestamps are numbers, sort by them
@@ -189,7 +225,8 @@ const SlackReleasesDashboard = () => {
           return new Date(b.timestamp) - new Date(a.timestamp);
         });
         
-        console.log('Formatted data:', sortedData);
+        console.log('Formatted data (after filtering):', sortedData);
+        console.log('Total releases after filtering:', sortedData.length);
         setReleases(sortedData);
         setFilteredReleases(sortedData);
       } else {
@@ -326,8 +363,22 @@ const SlackReleasesDashboard = () => {
                       </h3>
                       
                       {release.detailedNotes && (
-                        <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words">
-                          {release.detailedNotes}
+                        <div className="text-gray-700 leading-relaxed">
+                          {release.detailedNotes.split('\n').map((line, idx) => {
+                            // Check if line is a bullet point
+                            if (line.startsWith('• ')) {
+                              return (
+                                <div key={idx} className="flex items-start mb-1">
+                                  <span className="mr-2">•</span>
+                                  <span>{line.substring(2)}</span>
+                                </div>
+                              );
+                            }
+                            // Regular paragraph
+                            return line.trim() ? (
+                              <p key={idx} className="mb-2">{line}</p>
+                            ) : null;
+                          })}
                         </div>
                       )}
 
