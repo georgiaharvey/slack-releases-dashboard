@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { Search, ExternalLink } from "lucide-react";
+import { Search, ExternalLink, Paperclip } from "lucide-react";
 
 // === Google Sheets Fetch ===
 const fetchGoogleSheetsData = async () => {
@@ -16,25 +16,28 @@ const fetchGoogleSheetsData = async () => {
     if (!response.ok) throw new Error("Failed to fetch data");
     const rows = await response.json();
 
-    // Format Google Sheets data
-    const formattedData = rows.map((row, index) => ({
-      id: index + 1,
-      timestamp: row.Timestamp || "",
-      sender: row.Sender || "Unknown",
-      mainMessage: cleanSlackText(row["Main Message"]) || "",
-      detailedNotes: cleanSlackText(row["Detailed Notes"]) || "",
-      screenshotLink:
-        row["Screenshot Link"] && row["Screenshot Link"].trim() !== "null"
-          ? row["Screenshot Link"].trim()
-          : null,
-      slackLink:
-        row["Slack Link"] && row["Slack Link"].trim() !== "null"
-          ? row["Slack Link"].trim()
-          : null,
-      extractedLinks: extractLinks(
-        (row["Main Message"] || "") + " " + (row["Detailed Notes"] || "")
-      ),
-    }));
+    // Filter out thread replies and format data
+    const formattedData = rows
+      // Filter: Only include top-level messages (no replies). Replies have a thread_ts value.
+      .filter((row) => !row.thread_ts || row.thread_ts === row.ts)
+      .map((row, index) => ({
+        id: index + 1,
+        timestamp: row.Timestamp || "",
+        sender: formatSenderName(row.Sender || "Unknown"), // Apply sender name formatting
+        mainMessage: cleanSlackText(row["Main Message"]) || "",
+        detailedNotes: cleanSlackText(row["Detailed Notes"]) || "",
+        screenshotLink:
+          row["Screenshot Link"] && row["Screenshot Link"].trim() !== "null"
+            ? row["Screenshot Link"].trim()
+            : null,
+        slackLink:
+          row["Slack Link"] && row["Slack Link"].trim() !== "null"
+            ? row["Slack Link"].trim()
+            : null,
+        extractedLinks: extractLinks(
+          (row["Main Message"] || "") + " " + (row["Detailed Notes"] || "")
+        ),
+      }));
 
     return formattedData;
   } catch (error) {
@@ -45,9 +48,19 @@ const fetchGoogleSheetsData = async () => {
 
 // === Helper Functions ===
 
+// Format sender's name to Title Case
+const formatSenderName = (name) => {
+  if (!name) return "";
+  return name
+    .toLowerCase()
+    .split(".")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
 // Clean Slack-style formatting
 const cleanSlackText = (text) => {
-  if (!text) return text;
+  if (!text) return "";
 
   let cleaned = text;
 
@@ -69,12 +82,11 @@ const cleanSlackText = (text) => {
   // Remove bold markdown (*text* or **text**)
   cleaned = cleaned.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1");
 
-  // Preserve line breaks and bullet points
-  cleaned = cleaned
-    .split("\n")
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .join("\n");
-  cleaned = cleaned.replace(/^[\s]*[-*][\s]+/gm, "• ");
+  // Preserve line breaks
+  cleaned = cleaned.replace(/\n/g, "<br/>");
+
+  // Remove other specific slack formatting
+  cleaned = cleaned.replace(/<[^>]+>/g, "");
 
   return cleaned.trim();
 };
@@ -161,19 +173,25 @@ export default function SlackReleasesDashboard() {
                   </div>
 
                   {/* Main Message */}
-                  <p className="text-lg font-medium text-gray-900">
-                    {release.mainMessage}
-                  </p>
+                  <div
+                    className="text-lg font-medium text-gray-900"
+                    dangerouslySetInnerHTML={{ __html: release.mainMessage }}
+                  />
 
                   {/* Detailed Notes */}
                   {release.detailedNotes && (
-                    <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words">
-                      {release.detailedNotes}
-                    </div>
+                    <div
+                      className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
+                      dangerouslySetInnerHTML={{
+                        __html: release.detailedNotes,
+                      }}
+                    />
                   )}
 
                   {/* Links Section */}
-                  {release.extractedLinks.length > 0 && (
+                  {(release.extractedLinks.length > 0 ||
+                    release.screenshotLink ||
+                    release.slackLink) && (
                     <div className="pt-2">
                       <h4 className="text-sm font-semibold text-gray-600 mb-1">
                         Resources:
@@ -192,37 +210,33 @@ export default function SlackReleasesDashboard() {
                             </a>
                           </li>
                         ))}
+                        {release.screenshotLink && (
+                          <li>
+                            <a
+                              href={release.screenshotLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline flex items-center gap-1"
+                            >
+                              View Screenshot
+                              <Paperclip className="w-3 h-3" />
+                            </a>
+                          </li>
+                        )}
+                        {release.slackLink && (
+                          <li>
+                            <a
+                              href={release.slackLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline flex items-center gap-1"
+                            >
+                              View in Slack
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </li>
+                        )}
                       </ul>
-                    </div>
-                  )}
-
-                  {/* Screenshot */}
-                  {release.screenshotLink && (
-                    <div className="pt-2">
-                      <a
-                        href={release.screenshotLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline flex items-center gap-1"
-                      >
-                        View Screenshot
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    </div>
-                  )}
-
-                  {/* Slack Thread Link */}
-                  {release.slackLink && (
-                    <div className="pt-2">
-                      <a
-                        href={release.slackLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline flex items-center gap-1"
-                      >
-                        View in Slack
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
                     </div>
                   )}
                 </CardContent>
