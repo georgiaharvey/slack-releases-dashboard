@@ -16,6 +16,19 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
+  const formatSenderName = (name) => {
+    if (!name || typeof name !== 'string') return 'Unknown';
+    // Capitalize names that follow the "first.last" format
+    if (name.includes('.')) {
+      return name
+        .split('.')
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
+    // Capitalize single-word names
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  };
+
   // --- Improved cleaning of Slack markup for display ---
   const cleanSlackText = (text) => {
     if (!text) return '';
@@ -43,6 +56,9 @@ const SlackReleasesDashboard = () => {
     cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1'); // **bold**
     cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');     // *italic or single *
     cleaned = cleaned.replace(/_([^_]+)_/g, '$1');          // _italic_
+
+    // NEW: Create a paragraph break after a question mark
+    cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
 
     // 7) Normalize bullet markers and put each on a new line for list formatting
     // This finds any bullet-like character and replaces it with a newline and a standard '• ' format.
@@ -168,7 +184,7 @@ const SlackReleasesDashboard = () => {
           const item = {
             id: index + 1,
             timestamp: row[0] || '',
-            sender: row[1] || 'Unknown',
+            sender: formatSenderName(row[1]),
             mainMessage: cleanSlackText(messageText) || '',
             detailedNotes: cleanSlackText(detailedText) || '',
             screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' ? row[4].trim() : null,
@@ -321,7 +337,7 @@ const SlackReleasesDashboard = () => {
 
                     <div className="space-y-3">
                       {/* MAIN MESSAGE: use normal font weight so it doesn't force-bold */}
-                      <h3 className="text-lg font-normal text-gray-900">
+                      <h3 className="text-lg font-normal text-gray-900 whitespace-pre-line">
                         {release.mainMessage}
                       </h3>
 
