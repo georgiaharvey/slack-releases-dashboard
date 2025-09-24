@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ExternalLink, Paperclip } from 'lucide-react';
-import { format } from "date-fns";
+import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw } from 'lucide-react';
 
 const SlackReleasesDashboard = () => {
+  console.log('=== ENVIRONMENT CHECK ===');
+  console.log('API Key:', process.env.REACT_APP_GOOGLE_SHEETS_API_KEY ? 'EXISTS' : 'MISSING');
+  console.log('Sheet ID:', process.env.REACT_APP_GOOGLE_SHEET_ID ? 'EXISTS' : 'MISSING');
+  console.log('Worksheet:', process.env.REACT_APP_GOOGLE_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
+
   const [releases, setReleases] = useState([]);
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,49 +16,50 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
-  // --- Helper Functions ---
-
-  // Format sender's name to Title Case
-  const formatSenderName = (rawName) => {
-    if (!rawName) return "Unknown";
-    return rawName
-      .toLowerCase()
-      .split(/[._]/)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  };
-
-  // Clean Slack text, remove emojis, channel tags, format bullets
+  // --- Improved cleaning of Slack markup for display ---
   const cleanSlackText = (text) => {
-    if (!text) return "";
+    if (!text) return '';
 
     let cleaned = text;
 
-    // 1) Remove emojis like :wave: or :rocket:
-    cleaned = cleaned.replace(/:[a-zA-Z0-9_+\-]+:/g, "");
+    // 1) Convert Slack-style links: <https://url|Label> -> Label, <https://url> -> https://url
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2'); // <url|label> -> label
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1'); // <url> -> url
 
-    // 2) Remove markdown bold/italic markers (*text* or **text**)
-    cleaned = cleaned.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1");
+    // 2) Remove Slack-style channel mentions completely (e.g., <#C1234|channel>)
+    cleaned = cleaned.replace(/<#\w+\|?[^>]*>/g, '');
 
-    // 3) Convert Slack-style links: <https://url|Label> -> Label, <https://url> -> https://url
-    cleaned = cleaned.replace(/<https?:\/\/[^|]+\|([^>]+)>/g, "$1 ($1)");
-    cleaned = cleaned.replace(/<((?:https?|ftp):\/\/[^>]+)>/g, "$1");
+    // 3) User mentions <@U12345> -> @user (or remove if you prefer)
+    cleaned = cleaned.replace(/<@[^>]+>/g, '@user');
 
-    // 4) Clean up user and channel mentions
-    cleaned = cleaned.replace(/<#[^>]+>/g, "");
-    cleaned = cleaned.replace(/<@[^>]+>/g, "");
+    // 4) Remove Slack emoji shortcodes like :wave:
+    cleaned = cleaned.replace(/:[a-zA-Z0-9_+\-]+:/g, '');
 
     // 5) Remove code blocks and inline code
-    cleaned = cleaned.replace(/```[\s\S]*?```/g, "");
-    cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+    cleaned = cleaned.replace(/```[\s\S]*?```/g, ''); // remove fenced blocks
+    cleaned = cleaned.replace(/`([^`]+)`/g, '$1'); // inline code
 
-    // 6) Preserve paragraph breaks
-    cleaned = cleaned.replace(/\n{2,}/g, '\n\n');
+    // 6) Remove markdown bold/italic markers but keep text
+    cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1'); // **bold**
+    cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');     // *italic or single *
+    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');          // _italic_
 
-    return cleaned.trim();
+    // 7) Normalize bullet markers and put each on a new line for list formatting
+    // This finds any bullet-like character and replaces it with a newline and a standard '• ' format.
+    cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
+
+    // 8) Final cleanup of all lines, preserving paragraph breaks
+    cleaned = cleaned
+      .split('\n')
+      .map(line => line.trim()) // Trim each line
+      .join('\n') // Re-join with single newlines
+      .replace(/\n{3,}/g, '\n\n') // Collapse 3+ newlines into a standard paragraph break
+      .trim(); // Remove any leading/trailing whitespace from the whole block
+
+    return cleaned;
   };
 
-  // Extract all links into a separate array
+  // preserve previous link extraction behavior (returns array of URLs)
   const extractLinks = (text) => {
     if (!text) return [];
     const urlMatches = text.match(/<?(https?:\/\/[^\s>]+)>?/g);
@@ -62,52 +67,21 @@ const SlackReleasesDashboard = () => {
     return urlMatches.map(match => match.replace(/[<>]/g, ''));
   };
 
-  // Format timestamp for display
-  const formatTimestamp = (timestamp) => {
-    if (!timestamp) return '';
-    const date = new Date(Number(timestamp) * 1000);
-    if (isNaN(date.getTime())) return timestamp;
-    return format(date, "PPP p");
+  // NEW: Only treat a message as a "reply-to-skip" when the main message is < 200 characters AND there are no detailed notes.
+  // This is the single filtering criterion you asked for.
+  const isTooShortToShow = (messageText, detailedText) => {
+    const main = (messageText || '').trim();
+    const details = (detailedText || '').trim();
+
+    // If main message length is less than 200 and there are no detailed notes, skip it.
+    if (main.length > 0 && main.length < 200 && details.length === 0) return true;
+
+    // Keep everything else
+    return false;
   };
 
-  // --- Data Fetching ---
-  const fetchGoogleSheetsData = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(
-        "https://opensheet.elk.sh/1WcfJv6R3ZpKONX_kJ4PfZoixlffdeDQOjmiKZLDC2tE/Sheet1"
-      );
-      const rows = await response.json();
-
-      const formattedData = rows
-        // Filter out thread replies
-        .filter(row => !row.thread_ts)
-        .map((row, index) => {
-          const messageText = row[2] || "";
-          const detailedText = row[3] || "";
-
-          return {
-            id: index + 1,
-            timestamp: row[0] || "",
-            sender: formatSenderName(row[1] || "Unknown"),
-            mainMessage: cleanSlackText(messageText),
-            detailedNotes: cleanSlackText(detailedText),
-            screenshotLink: row[4] || null,
-            slackLink: row[5] || null,
-            extractedLinks: extractLinks((row[2] || "") + " " + (row[3] || "")),
-          };
-        });
-
-      setReleases(formattedData);
-      setFilteredReleases(formattedData);
-    } catch (error) {
-      console.error("Error fetching data:", error);
-    }
-    setLoading(false);
-  };
-
-  // --- React Hooks ---
   useEffect(() => {
+    console.log('Component mounted, fetching Google Sheets data...');
     fetchGoogleSheetsData();
   }, []);
 
@@ -120,7 +94,23 @@ const SlackReleasesDashboard = () => {
     setFilteredReleases(filtered);
   }, [searchTerm, releases]);
 
-  // --- Gemini Chat Handlers ---
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return '';
+    // handle both unix seconds and ISO strings
+    let date;
+    if (/^\d+$/.test(String(timestamp))) {
+      const ts = parseInt(timestamp, 10);
+      date = new Date(ts * 1000);
+    } else {
+      date = new Date(timestamp);
+    }
+    if (isNaN(date.getTime())) return timestamp;
+    return date.toLocaleString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short'
+    });
+  };
+
   const handleGeminiQuery = async (message) => {
     setGeminiLoading(true);
     setChatMessages(prev => [...prev, { role: 'user', content: message }]);
@@ -141,7 +131,78 @@ const SlackReleasesDashboard = () => {
     }
   };
 
-  // --- Main Render ---
+  const fetchGoogleSheetsData = async () => {
+    console.log('fetchGoogleSheetsData called');
+    setLoading(true);
+
+    try {
+      const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
+      const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
+      const WORKSHEET = process.env.REACT_APP_GOOGLE_SHEET_NAME || process.env.REACT_APP_GOOGLE_SHEETS_WORKSHEET || 'september';
+
+      console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
+
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
+      console.log('Fetching URL:', url);
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      console.log('Google Sheets Response:', data);
+
+      if (data.values && data.values.length > 1) {
+        const [headers, ...rows] = data.values;
+        console.log('Headers:', headers);
+        console.log('Rows count:', rows.length);
+
+        const formattedData = rows.map((row, index) => {
+          const messageText = row[2] || '';
+          const detailedText = row[3] || '';
+
+          // ONLY skip when message is too short and there are no detailed notes
+          if (isTooShortToShow(messageText, detailedText)) {
+            console.log(`Skipping short message at row ${index + 1}: "${String(messageText).slice(0, 80)}"`);
+            return null;
+          }
+
+          const item = {
+            id: index + 1,
+            timestamp: row[0] || '',
+            sender: row[1] || 'Unknown',
+            mainMessage: cleanSlackText(messageText) || '',
+            detailedNotes: cleanSlackText(detailedText) || '',
+            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' ? row[4].trim() : null,
+            slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' ? row[5].trim() : null,
+            extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
+          };
+
+          console.log(`Keeping message ${index + 1} by ${item.sender}: ${String(item.mainMessage).slice(0, 80)}...`);
+          return item;
+        }).filter(item => item !== null);
+
+        const sortedData = formattedData.sort((a, b) => {
+          // sort by unix timestamp (if numeric) otherwise by date string
+          const aNum = parseInt(a.timestamp, 10);
+          const bNum = parseInt(b.timestamp, 10);
+          if (!isNaN(aNum) && !isNaN(bNum)) return bNum - aNum;
+          return new Date(b.timestamp) - new Date(a.timestamp);
+        });
+
+        console.log('Formatted data:', sortedData);
+        setReleases(sortedData);
+        setFilteredReleases(sortedData);
+      } else {
+        console.log('No data found or empty response');
+        setReleases([]);
+        setFilteredReleases([]);
+      }
+    } catch (error) {
+      console.error('Error fetching Google Sheets data:', error);
+    }
+
+    setLoading(false);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       <div className="bg-white shadow-sm border-b border-slate-200">
@@ -187,6 +248,7 @@ const SlackReleasesDashboard = () => {
                 />
               </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center">
@@ -258,16 +320,18 @@ const SlackReleasesDashboard = () => {
                     </div>
 
                     <div className="space-y-3">
-                      <h3
-                        className="text-lg font-normal text-gray-900"
-                        dangerouslySetInnerHTML={{ __html: release.mainMessage }}
-                      />
+                      {/* MAIN MESSAGE: use normal font weight so it doesn't force-bold */}
+                      <h3 className="text-lg font-normal text-gray-900">
+                        {release.mainMessage}
+                      </h3>
+
+                      {/* DETAILED NOTES: whitespace-pre-line will respect paragraph breaks (\n\n) */}
                       {release.detailedNotes && (
-                        <div
-                          className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
-                          dangerouslySetInnerHTML={{ __html: release.detailedNotes }}
-                        />
+                        <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words">
+                          {release.detailedNotes}
+                        </div>
                       )}
+
                       {release.extractedLinks && release.extractedLinks.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-gray-100">
                           <p className="text-sm font-medium text-gray-600 mb-2">Links:</p>
