@@ -63,6 +63,10 @@ const SlackReleasesDashboard = () => {
     // 7) Normalize bullet markers and put each on a new line for list formatting
     // This finds any bullet-like character and replaces it with a newline and a standard '• ' format.
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
+    
+    // NEW: Bold specific keywords
+    const boldRegex = /(Internal release note|What(?:’|')s new|Why It Matters\?|What(?:’|')s next|Solution|Problem)/gi;
+    cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
 
     // 8) Final cleanup of all lines, preserving paragraph breaks
     cleaned = cleaned
@@ -336,16 +340,16 @@ const SlackReleasesDashboard = () => {
                     </div>
 
                     <div className="space-y-3">
-                      {/* MAIN MESSAGE: use normal font weight so it doesn't force-bold */}
-                      <h3 className="text-lg font-normal text-gray-900 whitespace-pre-line">
-                        {release.mainMessage}
-                      </h3>
+                      <h3
+                        className="text-lg font-normal text-gray-900 whitespace-pre-line"
+                        dangerouslySetInnerHTML={{ __html: release.mainMessage }}
+                      />
 
-                      {/* DETAILED NOTES: whitespace-pre-line will respect paragraph breaks (\n\n) */}
                       {release.detailedNotes && (
-                        <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words">
-                          {release.detailedNotes}
-                        </div>
+                        <div
+                          className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
+                          dangerouslySetInnerHTML={{ __html: release.detailedNotes }}
+                        />
                       )}
 
                       {release.extractedLinks && release.extractedLinks.length > 0 && (
