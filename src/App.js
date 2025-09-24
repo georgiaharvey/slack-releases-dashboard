@@ -16,6 +16,38 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
+  // Text cleaning function
+  const cleanSlackText = (text) => {
+    if (!text) return text;
+    
+    let cleaned = text;
+    
+    // Remove anything between colons (all emojis like :wave:, :tada:, etc.)
+    cleaned = cleaned.replace(/:[^:\s]*:/g, '');
+    
+    // Remove user/channel mentions in <@...> and <#...> format, but preserve URLs
+    cleaned = cleaned.replace(/<[@#][^>]+>/g, '');
+    
+    // Remove bold formatting (**text**)
+    cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
+    
+    // Clean up extra spaces
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    return cleaned;
+  };
+
+  // Extract URLs from text for clickable links
+  const extractLinks = (text) => {
+    if (!text) return [];
+    
+    // Find URLs wrapped in <> or standalone
+    const urlMatches = text.match(/<?(https?:\/\/[^\s>]+)>?/g);
+    if (!urlMatches) return [];
+    
+    return urlMatches.map(match => match.replace(/[<>]/g, ''));
+  };
+
   useEffect(() => {
     console.log('Component mounted, fetching Google Sheets data...');
     fetchGoogleSheetsData();
@@ -96,15 +128,19 @@ const SlackReleasesDashboard = () => {
           id: index + 1,
           timestamp: row[0] || '',
           sender: row[1] || 'Unknown',
-          mainMessage: row[2] || '',
-          detailedNotes: row[3] || '',
-          screenshotLink: row[4] && row[4] !== 'null' ? row[4] : null,
-          slackLink: row[5] && row[5] !== 'null' ? row[5] : null
+          mainMessage: cleanSlackText(row[2]) || '',
+          detailedNotes: cleanSlackText(row[3]) || '',
+          screenshotLink: row[4] && row[4] !== 'null' && row[4] !== '' ? row[4] : null,
+          slackLink: row[5] && row[5] !== 'null' && row[5] !== '' ? row[5] : null,
+          extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
         }));
         
-        console.log('Formatted data:', formattedData);
-        setReleases(formattedData);
-        setFilteredReleases(formattedData);
+        // Sort by timestamp (newest first)
+        const sortedData = formattedData.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
+        
+        console.log('Formatted data:', sortedData);
+        setReleases(sortedData);
+        setFilteredReleases(sortedData);
       } else {
         console.log('No data found or empty response');
       }
@@ -207,7 +243,7 @@ const SlackReleasesDashboard = () => {
                       </div>
                       <div className="flex space-x-2">
                         {release.screenshotLink && release.screenshotLink !== 'null' && (
-                          <a
+                          
                             href={release.screenshotLink}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -218,7 +254,7 @@ const SlackReleasesDashboard = () => {
                           </a>
                         )}
                         {release.slackLink && release.slackLink !== 'null' && (
-                          <a
+                          
                             href={release.slackLink}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -239,6 +275,26 @@ const SlackReleasesDashboard = () => {
                       {release.detailedNotes && (
                         <div className="text-gray-700 leading-relaxed whitespace-pre-wrap break-words">
                           {release.detailedNotes}
+                        </div>
+                      )}
+
+                      {release.extractedLinks && release.extractedLinks.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                          <p className="text-sm font-medium text-gray-600 mb-2">Links:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {release.extractedLinks.map((link, idx) => (
+                              
+                                key={idx}
+                                href={link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                <Link className="w-3 h-3 mr-1" />
+                                {link.length > 40 ? link.substring(0, 40) + '...' : link}
+                              </a>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
