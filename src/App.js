@@ -82,11 +82,12 @@ const cleanSlackText = (text) => {
   // Remove bold markdown (*text* or **text**)
   cleaned = cleaned.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1");
 
-  // Preserve line breaks
-  cleaned = cleaned.replace(/\n/g, "<br/>");
-
-  // Remove other specific slack formatting
-  cleaned = cleaned.replace(/<[^>]+>/g, "");
+  // Preserve line breaks and bullet points
+  cleaned = cleaned
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .join("\n");
+  cleaned = cleaned.replace(/^[\s]*[-*][\s]+/gm, "• ");
 
   return cleaned.trim();
 };
