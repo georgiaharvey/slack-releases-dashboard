@@ -20,12 +20,19 @@ const SlackReleasesDashboard = () => {
     if (!text) return text;
     
     let cleaned = text;
+    // Remove Slack emoji codes
     cleaned = cleaned.replace(/:[^:\s]*:/g, '');
+    // Remove Slack user/channel mentions
     cleaned = cleaned.replace(/<[@#][^>]+>/g, '');
-    cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    // Remove bold markdown - handle both **text** and *text*
+    cleaned = cleaned.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1');
+    // Preserve line breaks but collapse multiple spaces on same line
+    cleaned = cleaned.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).join('\n');
+    // Preserve bullet points
+    cleaned = cleaned.replace(/^[\s]*[•·▪▫◦‣⁃][\s]*/gm, '• ');
+    cleaned = cleaned.replace(/^[\s]*[-*][\s]+/gm, '• ');
     
-    return cleaned;
+    return cleaned.trim();
   };
 
   const extractLinks = (text) => {
@@ -113,16 +120,28 @@ const SlackReleasesDashboard = () => {
         console.log('Headers:', headers);
         console.log('Rows:', rows);
         
-        const formattedData = rows.map((row, index) => ({
-          id: index + 1,
-          timestamp: row[0] || '',
-          sender: row[1] || 'Unknown',
-          mainMessage: cleanSlackText(row[2]) || '',
-          detailedNotes: cleanSlackText(row[3]) || '',
-          screenshotLink: row[4] && row[4] !== 'null' && row[4] !== '' ? row[4] : null,
-          slackLink: row[5] && row[5] !== 'null' && row[5] !== '' ? row[5] : null,
-          extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
-        }));
+        const formattedData = rows.map((row, index) => {
+          const item = {
+            id: index + 1,
+            timestamp: row[0] || '',
+            sender: row[1] || 'Unknown',
+            mainMessage: cleanSlackText(row[2]) || '',
+            detailedNotes: cleanSlackText(row[3]) || '',
+            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' && row[4].trim() !== '' ? row[4].trim() : null,
+            slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' && row[5].trim() !== '' ? row[5].trim() : null,
+            extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
+          };
+          
+          // Debug logging for icon display
+          if (item.screenshotLink || item.slackLink) {
+            console.log(`Message ${index + 1} by ${item.sender}:`, {
+              screenshotLink: item.screenshotLink ? 'YES' : 'NO',
+              slackLink: item.slackLink ? 'YES' : 'NO'
+            });
+          }
+          
+          return item;
+        });
         
         const sortedData = formattedData.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
         
@@ -230,26 +249,26 @@ const SlackReleasesDashboard = () => {
                         </div>
                       </div>
                       <div className="flex space-x-2">
-                        {release.screenshotLink && release.screenshotLink !== 'null' && (
+                        {release.screenshotLink && (
                           <a
                             href={release.screenshotLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200"
                             title="View Screenshot"
                           >
-                            <Image className="w-4 h-4" />
+                            <Image className="w-5 h-5" />
                           </a>
                         )}
-                        {release.slackLink && release.slackLink !== 'null' && (
+                        {release.slackLink && (
                           <a
                             href={release.slackLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-gray-200"
                             title="View in Slack"
                           >
-                            <Link className="w-4 h-4" />
+                            <Link className="w-5 h-5" />
                           </a>
                         )}
                       </div>
@@ -261,7 +280,7 @@ const SlackReleasesDashboard = () => {
                       </h3>
                       
                       {release.detailedNotes && (
-                        <div className="text-gray-700 leading-relaxed whitespace-pre-wrap break-words">
+                        <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words">
                           {release.detailedNotes}
                         </div>
                       )}
