@@ -231,7 +231,7 @@ const SlackReleasesDashboard = () => {
                       </div>
                       <div className="flex space-x-2">
                         {release.screenshotLink && release.screenshotLink !== 'null' && (
-                          
+                          <a
                             href={release.screenshotLink}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -242,7 +242,7 @@ const SlackReleasesDashboard = () => {
                           </a>
                         )}
                         {release.slackLink && release.slackLink !== 'null' && (
-                          
+                          <a
                             href={release.slackLink}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -271,7 +271,7 @@ const SlackReleasesDashboard = () => {
                           <p className="text-sm font-medium text-gray-600 mb-2">Links:</p>
                           <div className="flex flex-wrap gap-2">
                             {release.extractedLinks.map((link, idx) => (
-                              
+                              <a
                                 key={idx}
                                 href={link}
                                 target="_blank"
