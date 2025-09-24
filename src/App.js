@@ -33,38 +33,48 @@ const SlackReleasesDashboard = () => {
     // Replace channel mentions <#C12345|channel> → #channel
     cleaned = cleaned.replace(/<#[A-Z0-9]+\|([^>]+)>/g, '#$1');
     
-    // Replace user mentions <@U12345> → @user - but skip if it's at the start (likely a reply)
+    // Replace user mentions <@U12345> → @user
     cleaned = cleaned.replace(/<@([A-Z0-9]+)>/g, '@$1');
     
-    // Remove ALL asterisk formatting more aggressively
-    // First remove **text**
-    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
-    // Then remove *text*
-    cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
-    // Remove any remaining stray asterisks
+    // AGGRESSIVE asterisk removal - multiple passes to catch all cases
+    // Remove **text**
+    cleaned = cleaned.replace(/\*\*([^*]+?)\*\*/g, '$1');
+    // Remove *text*
+    cleaned = cleaned.replace(/\*([^*]+?)\*/g, '$1');
+    // Remove _text_ (italic markdown)
+    cleaned = cleaned.replace(/_([^_]+?)_/g, '$1');
+    // Remove any leftover asterisks
     cleaned = cleaned.replace(/\*/g, '');
     
-    // Split into lines for better processing
+    // Process lines for better formatting
     let lines = cleaned.split('\n');
+    let processedLines = [];
     
-    // Process each line
-    lines = lines.map(line => {
-      // Trim each line
+    for (let line of lines) {
       line = line.trim();
       
-      // Convert bullet points to consistent format
+      // Skip empty lines
+      if (!line) {
+        processedLines.push('');
+        continue;
+      }
+      
+      // Convert various bullet formats to consistent format
       if (line.match(/^[•·▪▫◦‣⁃\-\*]/)) {
         line = '• ' + line.replace(/^[•·▪▫◦‣⁃\-\*]\s*/, '');
       }
       
-      // Collapse multiple spaces within the line
+      // Collapse multiple spaces
       line = line.replace(/\s+/g, ' ');
       
-      return line;
-    });
+      processedLines.push(line);
+    }
     
-    // Join lines back, removing empty lines but preserving paragraph breaks
-    cleaned = lines.filter(line => line.length > 0).join('\n');
+    // Join lines back together, preserving intentional line breaks
+    cleaned = processedLines.join('\n');
+    
+    // Clean up multiple consecutive newlines (keep max 2)
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
     
     return cleaned.trim();
   };
@@ -178,14 +188,27 @@ const SlackReleasesDashboard = () => {
         console.log('Total rows:', rows.length);
         
         const formattedData = rows.map((row, index) => {
-          // Skip if this appears to be a thread reply
-          // Thread replies often start with @mentions or are responses
           const messageText = row[2] || '';
           const detailedText = row[3] || '';
           
-          // Skip messages that appear to be replies (start with @mention)
+          // Skip messages that appear to be replies or too short
+          // 1. Skip if starts with @mention
           if (messageText.trim().startsWith('<@') || messageText.trim().startsWith('@')) {
-            console.log(`Skipping reply message at row ${index + 1}: ${messageText.substring(0, 50)}...`);
+            console.log(`Skipping reply at row ${index + 1}: ${messageText.substring(0, 50)}...`);
+            return null;
+          }
+          
+          // 2. Skip if message is too short to be a release (less than 50 characters and no detailed notes)
+          if (messageText.length < 50 && !detailedText) {
+            console.log(`Skipping short message at row ${index + 1}: "${messageText}"`);
+            return null;
+          }
+          
+          // 3. Skip common reply phrases
+          const lowerMessage = messageText.toLowerCase();
+          const skipPhrases = ['thanks', 'got it', 'looks good', 'awesome', 'great', '+1', 'nice', 'cool'];
+          if (skipPhrases.some(phrase => lowerMessage === phrase || (lowerMessage.length < 100 && lowerMessage.includes(phrase)))) {
+            console.log(`Skipping likely reply at row ${index + 1}: "${messageText}"`);
             return null;
           }
           
@@ -200,21 +223,10 @@ const SlackReleasesDashboard = () => {
             extractedLinks: extractLinks((messageText || '') + ' ' + (detailedText || ''))
           };
           
-          // Additional filter: skip if the main message is too short (likely not a release announcement)
-          if (item.mainMessage.length < 10 && !item.detailedNotes) {
-            console.log(`Skipping short message at row ${index + 1}: ${item.mainMessage}`);
-            return null;
-          }
-          
-          // Debug logging for icon display
-          console.log(`Message ${index + 1} by ${item.sender}:`, {
-            screenshotLink: item.screenshotLink ? 'YES' : 'NO',
-            slackLink: item.slackLink ? 'YES' : 'NO',
-            mainMessage: item.mainMessage.substring(0, 50) + '...'
-          });
+          console.log(`Keeping message ${index + 1} by ${item.sender}: ${item.mainMessage.substring(0, 50)}...`);
           
           return item;
-        }).filter(item => item !== null); // Remove null entries
+        }).filter(item => item !== null);
         
         const sortedData = formattedData.sort((a, b) => {
           // If timestamps are numbers, sort by them
@@ -363,21 +375,37 @@ const SlackReleasesDashboard = () => {
                       </h3>
                       
                       {release.detailedNotes && (
-                        <div className="text-gray-700 leading-relaxed">
-                          {release.detailedNotes.split('\n').map((line, idx) => {
-                            // Check if line is a bullet point
-                            if (line.startsWith('• ')) {
+                        <div className="text-gray-700 leading-relaxed space-y-2">
+                          {release.detailedNotes.split('\n\n').map((paragraph, pIdx) => {
+                            // Check if this paragraph contains bullet points
+                            const lines = paragraph.split('\n');
+                            const hasBullets = lines.some(line => line.startsWith('• '));
+                            
+                            if (hasBullets) {
+                              // Render as a bullet list
                               return (
-                                <div key={idx} className="flex items-start mb-1">
-                                  <span className="mr-2">•</span>
-                                  <span>{line.substring(2)}</span>
-                                </div>
+                                <ul key={pIdx} className="space-y-1 ml-4">
+                                  {lines.map((line, lIdx) => {
+                                    if (line.startsWith('• ')) {
+                                      return (
+                                        <li key={lIdx} className="flex items-start">
+                                          <span className="mr-2">•</span>
+                                          <span>{line.substring(2)}</span>
+                                        </li>
+                                      );
+                                    } else if (line.trim()) {
+                                      // Non-bullet line in a bullet section
+                                      return <div key={lIdx} className="ml-6">{line}</div>;
+                                    }
+                                    return null;
+                                  })}
+                                </ul>
                               );
+                            } else if (paragraph.trim()) {
+                              // Regular paragraph
+                              return <p key={pIdx}>{paragraph}</p>;
                             }
-                            // Regular paragraph
-                            return line.trim() ? (
-                              <p key={idx} className="mb-2">{line}</p>
-                            ) : null;
+                            return null;
                           })}
                         </div>
                       )}
