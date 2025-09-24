@@ -16,32 +16,21 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
-  // Text cleaning function
   const cleanSlackText = (text) => {
     if (!text) return text;
     
     let cleaned = text;
-    
-    // Remove anything between colons (all emojis like :wave:, :tada:, etc.)
     cleaned = cleaned.replace(/:[^:\s]*:/g, '');
-    
-    // Remove user/channel mentions in <@...> and <#...> format, but preserve URLs
     cleaned = cleaned.replace(/<[@#][^>]+>/g, '');
-    
-    // Remove bold formatting (**text**)
     cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
-    
-    // Clean up extra spaces
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
     
     return cleaned;
   };
 
-  // Extract URLs from text for clickable links
   const extractLinks = (text) => {
     if (!text) return [];
     
-    // Find URLs wrapped in <> or standalone
     const urlMatches = text.match(/<?(https?:\/\/[^\s>]+)>?/g);
     if (!urlMatches) return [];
     
@@ -135,7 +124,6 @@ const SlackReleasesDashboard = () => {
           extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
         }));
         
-        // Sort by timestamp (newest first)
         const sortedData = formattedData.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
         
         console.log('Formatted data:', sortedData);
@@ -291,7 +279,7 @@ const SlackReleasesDashboard = () => {
                                 className="flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline"
                               >
                                 <Link className="w-3 h-3 mr-1" />
-                                {link.length > 40 ? link.substring(0, 40) + '...' : link}
+                                {link.length > 40 ? `${link.substring(0, 40)}...` : link}
                               </a>
                             ))}
                           </div>
