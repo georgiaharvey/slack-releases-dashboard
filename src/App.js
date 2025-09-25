@@ -88,10 +88,10 @@ function App() {
     });
   };
   
-  // Changed back to 200 characters minimum as requested
+  // Temporarily lowered to 50 to see all messages - adjust as needed
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
-    return main.length > 0 && main.length < 200;
+    return main.length > 0 && main.length < 50;  // Changed from 200 to 50
   };
   
   const fetchGoogleSheetsData = async () => {
@@ -380,5 +380,7 @@ function App() {
     </div>
   );
 }
+
+export default App;
 
 export default App;
