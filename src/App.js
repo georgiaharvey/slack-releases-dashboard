@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw } from 'lucide-react';
+import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle } from 'lucide-react'; // Added ChevronDown and MessageCircle
 
 const SlackReleasesDashboard = () => {
   console.log('=== ENVIRONMENT CHECK ===');
@@ -15,85 +15,65 @@ const SlackReleasesDashboard = () => {
   const [currentMessage, setCurrentMessage] = useState('');
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
+  const [openReplies, setOpenReplies] = useState({}); // State for accordions
+
+  // Handler to toggle the reply dropdown for a specific release
+  const toggleReplies = (timestamp) => {
+    setOpenReplies(prev => ({
+      ...prev,
+      [timestamp]: !prev[timestamp]
+    }));
+  };
 
   const formatSenderName = (name) => {
     if (!name || typeof name !== 'string') return 'Unknown';
-    // Capitalize names that follow the "first.last" format
     if (name.includes('.')) {
       return name
         .split('.')
         .map(part => part.charAt(0).toUpperCase() + part.slice(1))
         .join(' ');
     }
-    // Capitalize single-word names
     return name.charAt(0).toUpperCase() + name.slice(1);
   };
 
-  // NEW: Helper function to validate and return a clean URL or null
   const getValidUrl = (url) => {
     if (!url || typeof url !== 'string') return null;
     const trimmedUrl = url.trim();
     if (trimmedUrl === '' || trimmedUrl.toLowerCase() === 'null') {
       return null;
     }
-    // Check if the string is a valid web URL
     if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
       return trimmedUrl;
     }
     return null;
   };
 
-  // --- Improved cleaning of Slack markup for display ---
   const cleanSlackText = (text) => {
     if (!text) return '';
-
     let cleaned = text;
-
-    // 1) Convert Slack-style links: <https://url|Label> -> Label, <https://url> -> https://url
-    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2'); // <url|label> -> label
-    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1'); // <url> -> url
-
-    // 2) Remove Slack-style channel mentions completely (e.g., <#C1234|channel>)
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2');
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1');
     cleaned = cleaned.replace(/<#\w+\|?[^>]*>/g, '');
-
-    // 3) User mentions <@U12345> -> @user (or remove if you prefer)
     cleaned = cleaned.replace(/<@[^>]+>/g, '@user');
-
-    // 4) Remove Slack emoji shortcodes like :wave:
     cleaned = cleaned.replace(/:[a-zA-Z0-9_+\-]+:/g, '');
-
-    // 5) Remove code blocks and inline code
-    cleaned = cleaned.replace(/```[\s\S]*?```/g, ''); // remove fenced blocks
-    cleaned = cleaned.replace(/`([^`]+)`/g, '$1'); // inline code
-
-    // 6) Remove markdown bold/italic markers but keep text
-    cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1'); // **bold**
-    cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');     // *italic or single *
-    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');          // _italic_
-
-    // NEW: Create a paragraph break after a question mark
+    cleaned = cleaned.replace(/```[\s\S]*?```/g, '');
+    cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+    cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1');
+    cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');
+    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
     cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
-
-    // 7) Normalize bullet markers and put each on a new line for list formatting
-    // This finds any bullet-like character and replaces it with a newline and a standard '• ' format.
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
-     
-    // NEW: Bold specific keywords
     const boldRegex = /(Internal release note|What(?:’|')s new|Why It Matters\?|What(?:’|')s next|Solution|Problem)/gi;
     cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
-
-    // 8) Final cleanup of all lines, preserving paragraph breaks
     cleaned = cleaned
       .split('\n')
-      .map(line => line.trim()) // Trim each line
-      .join('\n') // Re-join with single newlines
-      .replace(/\n{3,}/g, '\n\n') // Collapse 3+ newlines into a standard paragraph break
-      .trim(); // Remove any leading/trailing whitespace from the whole block
-
+      .map(line => line.trim())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     return cleaned;
   };
 
-  // preserve previous link extraction behavior (returns array of URLs)
   const extractLinks = (text) => {
     if (!text) return [];
     const urlMatches = text.match(/<?(https?:\/\/[^\s>]+)>?/g);
@@ -101,40 +81,33 @@ const SlackReleasesDashboard = () => {
     return urlMatches.map(match => match.replace(/[<>]/g, ''));
   };
 
-  // NEW: Only treat a message as a "reply-to-skip" when the main message is < 200 characters AND there are no detailed notes.
-  // This is the single filtering criterion you asked for.
-  const isTooShortToShow = (messageText, detailedText) => {
+  const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
-    const details = (detailedText || '').trim();
-
-    // If main message length is less than 200 and there are no detailed notes, skip it.
-    if (main.length > 0 && main.length < 200 && details.length === 0) return true;
-
-    // Keep everything else
+    if (main.length > 0 && main.length < 200) return true;
     return false;
   };
 
   useEffect(() => {
-    console.log('Component mounted, fetching Google Sheets data...');
     fetchGoogleSheetsData();
   }, []);
 
   useEffect(() => {
-    const filtered = releases.filter(release =>
-      (release.mainMessage || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (release.sender || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (release.detailedNotes || '').toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filtered = releases.filter(release => {
+        const searchTermLower = searchTerm.toLowerCase();
+        const inMainMessage = (release.mainMessage || '').toLowerCase().includes(searchTermLower);
+        const inSender = (release.sender || '').toLowerCase().includes(searchTermLower);
+        const inReplies = release.replies.some(reply => (reply.mainMessage || '').toLowerCase().includes(searchTermLower));
+        return inMainMessage || inSender || inReplies;
+    });
     setFilteredReleases(filtered);
   }, [searchTerm, releases]);
 
+
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-    // handle both unix seconds and ISO strings
     let date;
     if (/^\d+$/.test(String(timestamp))) {
-      const ts = parseInt(timestamp, 10);
-      date = new Date(ts * 1000);
+      date = new Date(parseInt(timestamp, 10) * 1000);
     } else {
       date = new Date(timestamp);
     }
@@ -166,84 +139,90 @@ const SlackReleasesDashboard = () => {
   };
 
   const fetchGoogleSheetsData = async () => {
-    console.log('fetchGoogleSheetsData called');
     setLoading(true);
-
     try {
       const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
       const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
       const WORKSHEET = process.env.REACT_APP_GOOGLE_SHEET_NAME || process.env.REACT_APP_GOOGLE_SHEETS_WORKSHEET || 'september';
-
-      console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
-
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
-      console.log('Fetching URL:', url);
-
       const response = await fetch(url);
       const data = await response.json();
 
-      console.log('Google Sheets Response:', data);
-
       if (data.values && data.values.length > 1) {
         const [headers, ...rows] = data.values;
-        console.log('Headers:', headers);
-        console.log('Rows count:', rows.length);
 
-        const formattedData = rows.map((row, index) => {
-          const messageText = row[2] || '';
-          const detailedText = row[3] || '';
-
-          // ONLY skip when message is too short and there are no detailed notes
-          if (isTooShortToShow(messageText, detailedText)) {
-            console.log(`Skipping short message at row ${index + 1}: "${String(messageText).slice(0, 80)}"`);
-            return null;
-          }
-
-          const item = {
-            id: index + 1,
-            timestamp: row[0] || '',
-            sender: formatSenderName(row[1]),
-            mainMessage: cleanSlackText(messageText) || '',
-            detailedNotes: cleanSlackText(detailedText) || '',
+        const allItems = rows.map((row, index) => {
+          if (!row[0]) return null; // Skip rows without a timestamp
+          // Assumes columns are: 0:ts, 1:sender, 2:mainMessage, 3:detailedNotes, 4:screenshot, 5:slackLink, 6:threadParentId
+          return {
+            timestamp: row[0],
+            sender: formatSenderName(row[1] || 'Unknown'),
+            mainMessage: row[2] || '',
+            detailedNotes: row[3] || '',
             screenshotLink: getValidUrl(row[4]),
             slackLink: getValidUrl(row[5]),
-            extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
+            threadParentId: row[6] || null,
           };
-
-          console.log(`Keeping message ${index + 1} by ${item.sender}: ${String(item.mainMessage).slice(0, 80)}...`);
-          return item;
         }).filter(item => item !== null);
 
-        // NEW: De-duplicate releases based on the unique timestamp
-        const uniqueMap = new Map();
-        formattedData.forEach(item => uniqueMap.set(item.timestamp, item));
-        const uniqueData = Array.from(uniqueMap.values());
-
-        const sortedData = uniqueData.sort((a, b) => {
-          // sort by unix timestamp (if numeric) otherwise by date string
-          const aNum = parseInt(a.timestamp, 10);
-          const bNum = parseInt(b.timestamp, 10);
-          if (!isNaN(aNum) && !isNaN(bNum)) return bNum - aNum;
-          return new Date(b.timestamp) - new Date(a.timestamp);
+        // Separate parent messages and replies
+        const parentReleases = [];
+        const replies = [];
+        allItems.forEach(item => {
+          if (item.threadParentId) {
+            replies.push(item);
+          } else {
+            parentReleases.push(item);
+          }
+        });
+        
+        // Group replies by their parent's timestamp
+        const repliesMap = new Map();
+        replies.forEach(reply => {
+          const parentId = reply.threadParentId;
+          if (!repliesMap.has(parentId)) {
+            repliesMap.set(parentId, []);
+          }
+          repliesMap.get(parentId).push(reply);
         });
 
-        console.log('Formatted data:', sortedData);
+        // Attach replies to their parent releases and clean the text
+        const mergedData = parentReleases.map(parent => {
+          const childReplies = (repliesMap.get(parent.timestamp) || []).map(reply => ({
+              ...reply,
+              mainMessage: cleanSlackText(reply.mainMessage),
+          }));
+
+          return {
+            ...parent,
+            mainMessage: cleanSlackText(parent.mainMessage),
+            detailedNotes: cleanSlackText(parent.detailedNotes),
+            replies: childReplies.sort((a,b) => a.timestamp - b.timestamp),
+          };
+        });
+        
+        // De-duplicate parent releases just in case
+        const uniqueMap = new Map();
+        mergedData.forEach(item => uniqueMap.set(item.timestamp, item));
+        const uniqueData = Array.from(uniqueMap.values());
+
+        const sortedData = uniqueData.sort((a, b) => b.timestamp - a.timestamp);
+        
         setReleases(sortedData);
         setFilteredReleases(sortedData);
       } else {
-        console.log('No data found or empty response');
         setReleases([]);
         setFilteredReleases([]);
       }
     } catch (error) {
       console.error('Error fetching Google Sheets data:', error);
     }
-
     setLoading(false);
   };
-
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      {/* Header and Controls */}
       <div className="bg-white shadow-sm border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
@@ -252,20 +231,11 @@ const SlackReleasesDashboard = () => {
               <p className="text-gray-600 mt-1">Track and analyze your team's release communications</p>
             </div>
             <div className="flex space-x-3">
-              <button
-                onClick={fetchGoogleSheetsData}
-                disabled={loading}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh Data
+              <button onClick={fetchGoogleSheetsData} disabled={loading} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Refresh Data
               </button>
-              <button
-                onClick={() => setShowChat(!showChat)}
-                className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
-                <Sparkles className="w-4 h-4 mr-2" />
-                Ask Gemini
+              <button onClick={() => setShowChat(!showChat)} className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                <Sparkles className="w-4 h-4 mr-2" /> Ask Gemini
               </button>
             </div>
           </div>
@@ -275,53 +245,24 @@ const SlackReleasesDashboard = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex gap-8">
           <div className={`flex-1 ${showChat ? 'mr-0' : ''}`}>
+            {/* Search and Stats cards */}
             <div className="mb-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  placeholder="Search releases, messages, or team members..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+                <input type="text" placeholder="Search releases, messages, or team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"/>
               </div>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                <div className="flex items-center">
-                  <MessageSquare className="w-8 h-8 text-blue-600" />
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Total Releases</p>
-                    <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                <div className="flex items-center">
-                  <User className="w-8 h-8 text-green-600" />
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Active Contributors</p>
-                    <p className="text-2xl font-bold text-gray-900">{new Set(releases.map(r => r.sender)).size}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-                <div className="flex items-center">
-                  <Calendar className="w-8 h-8 text-purple-600" />
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">This Month</p>
-                    <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
-                  </div>
-                </div>
-              </div>
+               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200"><div className="flex items-center"><MessageSquare className="w-8 h-8 text-blue-600" /><div className="ml-4"><p className="text-sm font-medium text-gray-600">Total Releases</p><p className="text-2xl font-bold text-gray-900">{releases.length}</p></div></div></div>
+               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200"><div className="flex items-center"><User className="w-8 h-8 text-green-600" /><div className="ml-4"><p className="text-sm font-medium text-gray-600">Active Contributors</p><p className="text-2xl font-bold text-gray-900">{new Set(releases.map(r => r.sender)).size}</p></div></div></div>
+               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200"><div className="flex items-center"><Calendar className="w-8 h-8 text-purple-600" /><div className="ml-4"><p className="text-sm font-medium text-gray-600">This Month</p><p className="text-2xl font-bold text-gray-900">{releases.length}</p></div></div></div>
             </div>
 
             <div className="space-y-6">
               {filteredReleases.map((release) => (
                 <div key={release.timestamp} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
                   <div className="p-6">
+                    {/* Main release card header */}
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">
@@ -333,141 +274,83 @@ const SlackReleasesDashboard = () => {
                         </div>
                       </div>
                       <div className="flex space-x-2">
-                        {release.screenshotLink && (
-                          <a
-                            href={release.screenshotLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200"
-                            title="View Screenshot"
-                          >
-                            <Image className="w-5 h-5" />
-                          </a>
-                        )}
-                        {release.slackLink && (
-                          <a
-                            href={release.slackLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-gray-200"
-                            title="View in Slack"
-                          >
-                            <Link className="w-5 h-5" />
-                          </a>
-                        )}
+                        {release.screenshotLink && (<a href={release.screenshotLink} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200" title="View Screenshot"><Image className="w-5 h-5" /></a>)}
+                        {release.slackLink && (<a href={release.slackLink} target="_blank" rel="noopener noreferrer" className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-gray-200" title="View in Slack"><Link className="w-5 h-5" /></a>)}
                       </div>
                     </div>
 
+                    {/* Main release content */}
                     <div className="space-y-3">
                       <h3
                         className="text-lg font-normal text-gray-900 whitespace-pre-line"
                         dangerouslySetInnerHTML={{ __html: release.mainMessage }}
                       />
-
                       {release.detailedNotes && (
                         <div
                           className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
                           dangerouslySetInnerHTML={{ __html: release.detailedNotes }}
                         />
                       )}
+                    </div>
 
-                      {release.extractedLinks && release.extractedLinks.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <p className="text-sm font-medium text-gray-600 mb-2">Links:</p>
-                          <div className="flex flex-wrap gap-2">
-                            {release.extractedLinks.map((link, idx) => (
-                              <a
-                                key={idx}
-                                href={link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                              >
-                                <Link className="w-3 h-3 mr-1" />
-                                {link.length > 40 ? `${link.substring(0, 40)}...` : link}
-                              </a>
+                    {/* NEW: Replies dropdown section */}
+                    {release.replies && release.replies.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-slate-100">
+                        <button
+                          onClick={() => toggleReplies(release.timestamp)}
+                          className="flex items-center justify-between w-full text-left text-sm font-medium text-purple-600 hover:text-purple-800"
+                        >
+                          <span className="flex items-center">
+                            <MessageCircle className="w-4 h-4 mr-2" />
+                            View {release.replies.length} {release.replies.length > 1 ? 'Replies' : 'Reply'}
+                          </span>
+                          <ChevronDown className={`w-5 h-5 transition-transform ${openReplies[release.timestamp] ? 'rotate-180' : ''}`} />
+                        </button>
+                        {openReplies[release.timestamp] && (
+                          <div className="mt-4 pl-6 border-l-2 border-slate-200 space-y-6">
+                            {release.replies.map(reply => (
+                              <div key={reply.timestamp}>
+                                <div className="flex items-center space-x-3 mb-2">
+                                  <div className="w-8 h-8 bg-gradient-to-r from-slate-400 to-slate-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                                    {reply.sender.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-gray-800 text-sm">{reply.sender}</p>
+                                    <p className="text-xs text-gray-500">{formatTimestamp(reply.timestamp)}</p>
+                                  </div>
+                                </div>
+                                <div
+                                  className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
+                                  dangerouslySetInnerHTML={{ __html: reply.mainMessage }}
+                                />
+                              </div>
                             ))}
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
 
-              {filteredReleases.length === 0 && (
+              {filteredReleases.length === 0 && !loading && (
                 <div className="text-center py-12">
                   <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No releases found matching your search.</p>
+                  <p className="text-gray-500">No releases found.</p>
                 </div>
               )}
             </div>
           </div>
 
+          {/* Chat sidebar remains the same */}
           {showChat && (
-            <div className="w-96 bg-white rounded-xl shadow-sm border border-slate-200 h-fit">
-              <div className="p-4 border-b border-slate-200">
-                <div className="flex items-center space-x-2">
-                  <Sparkles className="w-5 h-5 text-purple-600" />
-                  <h3 className="font-semibold text-gray-900">Ask Gemini</h3>
-                </div>
-                <p className="text-sm text-gray-600 mt-1">Ask questions about your releases</p>
-              </div>
-
+             <div className="w-96 bg-white rounded-xl shadow-sm border border-slate-200 h-fit">
+              <div className="p-4 border-b border-slate-200"><div className="flex items-center space-x-2"><Sparkles className="w-5 h-5 text-purple-600" /><h3 className="font-semibold text-gray-900">Ask Gemini</h3></div><p className="text-sm text-gray-600 mt-1">Ask questions about your releases</p></div>
               <div className="h-96 overflow-y-auto p-4">
-                {chatMessages.length === 0 ? (
-                  <div className="text-center text-gray-500 mt-8">
-                    <Sparkles className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>Start a conversation with Gemini about your release data!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {chatMessages.map((msg, idx) => (
-                      <div key={idx} className={msg.role === 'user' ? 'ml-4' : 'mr-4'}>
-                        <div className={`p-3 rounded-lg ${
-                          msg.role === 'user'
-                            ? 'bg-blue-600 text-white ml-auto'
-                            : 'bg-gray-100 text-gray-900'
-                        }`}>
-                          <p className="text-sm">{msg.content}</p>
-                        </div>
-                      </div>
-                    ))}
-                    {geminiLoading && (
-                      <div className="mr-4">
-                        <div className="bg-gray-100 text-gray-900 p-3 rounded-lg">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {chatMessages.length === 0 ? (<div className="text-center text-gray-500 mt-8"><Sparkles className="w-8 h-8 mx-auto mb-2 opacity-50" /><p>Start a conversation with Gemini about your release data!</p></div>) : (<div className="space-y-4">{chatMessages.map((msg, idx) => (<div key={idx} className={msg.role === 'user' ? 'ml-4' : 'mr-4'}><div className={`p-3 rounded-lg ${ msg.role === 'user' ? 'bg-blue-600 text-white ml-auto' : 'bg-gray-100 text-gray-900'}`}><p className="text-sm">{msg.content}</p></div></div>))}
+                {geminiLoading && (<div className="mr-4"><div className="bg-gray-100 text-gray-900 p-3 rounded-lg"><div className="flex items-center space-x-2"><div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div><div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div></div></div></div>)}</div>)}
               </div>
-
-              <div className="p-4 border-t border-slate-200">
-                <div className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={currentMessage}
-                    onChange={(e) => setCurrentMessage(e.target.value)}
-                    placeholder="Ask about your releases..."
-                    disabled={geminiLoading}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                  />
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={geminiLoading || !currentMessage.trim()}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
+              <div className="p-4 border-t border-slate-200"><div className="flex space-x-2"><input type="text" value={currentMessage} onChange={(e) => setCurrentMessage(e.target.value)} placeholder="Ask about your releases..." disabled={geminiLoading} onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm" /><button onClick={handleSendMessage} disabled={geminiLoading || !currentMessage.trim()} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50">Send</button></div></div>
             </div>
           )}
         </div>
