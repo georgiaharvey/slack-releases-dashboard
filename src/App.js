@@ -1,7 +1,8 @@
-import React, 'useState', useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle } from 'lucide-react';
+import './App.css';
 
-const SlackReleasesDashboard = () => {
+function App() {
   const [releases, setReleases] = useState([]);
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -42,7 +43,7 @@ const SlackReleasesDashboard = () => {
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-    const date = new Date(parseInt(timestamp, 10)); // Use milliseconds for JS Date
+    const date = new Date(parseInt(timestamp, 10));
     if (isNaN(date.getTime())) return "Invalid Date";
     return date.toLocaleString('en-US', {
       year: 'numeric', month: 'long', day: 'numeric',
@@ -50,15 +51,12 @@ const SlackReleasesDashboard = () => {
     });
   };
   
-  // This function is kept for the "Refresh Data" button but is not called on initial load.
   const fetchGoogleSheetsData = async () => {
     setLoading(true);
-    alert("This would fetch live data from Google Sheets, replacing the demo data.");
-    // The live data fetching logic would go here.
+    alert("This would fetch live data from Google Sheets, which would be added to the demo data.");
     setLoading(false);
   };
 
-  // This function now uses a 100 character minimum
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
     return main.length > 0 && main.length < 100;
@@ -67,28 +65,40 @@ const SlackReleasesDashboard = () => {
   useEffect(() => {
     // ========================================================================
     // FORCED DEMO DATA STARTS HERE
-    // This section creates the exact release and dropdown you requested.
     // ========================================================================
 
-    const demoRelease = {
-      timestamp: "1727177340000", // September 24, 2025 at 11:29 AM UTC
+    const demoRelease1 = {
+      timestamp: "1727177340000",
       sender: 'Kami Fournier',
-      mainMessage: cleanSlackText(`Timeframe visualization Grid column is now available internally\n\nWhat's New?\n\nGrid boards now support timeframe visualization column. It turns grid boards into powerful Gantt\n• like visualizations, enabling product teams to visualize deep hierarchies in time.\n\n• Enable/disable Timeframe visualization column from Default fields in the Grid column management\n\n• Configure Timeframe visualization granularity and timeline range from the column context menu\n\n• Resize column width as usual to suit your needs\n\n• ✚ Assign and update the timeframe of your items by clicking in the timeframe cells\n\n• Fiscal calendar settings are respected\nCheck out the for more details!`),
-      detailedNotes: '',
-      screenshotLink: null,
-      slackLink: "#", // Placeholder link
+      mainMessage: cleanSlackText(`Timeframe visualization Grid column is now available internally\n\nWhat's New?\n\nGrid boards now support timeframe visualization column...`),
+      slackLink: "#",
       replies: [
         {
-          timestamp: "1727177460000", // September 24, 2025 at 11:31 AM UTC
+          timestamp: "1727177460000",
           sender: 'Kamila',
-          mainMessage: cleanSlackText(`Why It Matters?\n\nTimeframe visualization column allows teams to show what their work contributes to, whether it's their company's objectives hierarchy or broader domains represented by components in the product hierarchy.\n\nWhat's next\nAssuming all goes well, we'll release to GA in a week and to the exclusion list the week after that.\n\nKudos Big thanks to the team and especially @user and @user\n\nQuestions. If you have questions or feedback, please reach out.`),
+          mainMessage: cleanSlackText(`Why It Matters?\n\nTimeframe visualization column allows teams to show what their work contributes to...`),
         }
       ]
     };
 
-    const allData = [demoRelease]; // You can add more forced releases here if needed
+    const demoRelease2 = {
+        timestamp: "1727200920000",
+        sender: 'Linda Czinner',
+        mainMessage: cleanSlackText(`We introduced a small improvement for the grouping and released it to GA 100%!\n\nWhat’s new\n\n• After the new grouping release...`),
+        slackLink: "#",
+        replies: []
+    };
+    
+    const demoRelease3 = {
+        timestamp: "1758630185000",
+        sender: 'Ben Allen',
+        mainMessage: cleanSlackText(`Internal release note: APIv2 public beta\n\nWe've been polishing the docs and getting everything just right...`),
+        slackLink: "#",
+        replies: []
+    };
 
-    // Apply the filter to the demo data
+
+    const allData = [demoRelease1, demoRelease2, demoRelease3];
     const finalData = allData.filter(release => !isTooShortToShow(release.mainMessage));
 
     setReleases(finalData);
@@ -203,6 +213,6 @@ const SlackReleasesDashboard = () => {
       </div>
     </div>
   );
-};
+}
 
-export default SlackReleasesDashboard;
+export default App;
