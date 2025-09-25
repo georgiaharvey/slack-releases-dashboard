@@ -79,7 +79,6 @@ function App() {
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-    // Timestamps from Slack are in seconds with microseconds, so we split at the '.'
     const date = new Date(parseInt(timestamp.split('.')[0], 10) * 1000);
     if (isNaN(date.getTime())) return "Invalid Date";
     return date.toLocaleString('en-US', {
@@ -178,7 +177,7 @@ function App() {
               detailedNotes: cleanSlackText(r.detailedNotes)
             })).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
           }))
-          // Filter to keep messages >= 200 characters
+          // Filter to keep messages >= 50 characters
           .filter(parent => !isTooShortToShow(parent.mainMessage));
 
         const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
@@ -252,7 +251,7 @@ function App() {
               </div>
             </div>
 
-            {/* ADDED: Statistics Cards */}
+            {/* Statistics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center">
@@ -380,7 +379,5 @@ function App() {
     </div>
   );
 }
-
-export default App;
 
 export default App;
