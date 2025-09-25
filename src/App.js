@@ -99,7 +99,7 @@ function App() {
     cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
     cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
-    const boldRegex = /(Internal release note|What(?:'|')s new|What's new|Why It Matters\?|What(?:'|')s next|Solution|Problem)/gi;
+    const boldRegex = /(Internal release note|What(?:'|')s new|What's new|Kudos|Feedback|Why It Matters\?|What(?:'|')s next|Solution|Problem)/gi;
     cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
     return cleaned.split('\n').map(line => line.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   };
@@ -185,9 +185,20 @@ function App() {
             item.threadParentId = '1758713371';
           }
           
-          // Manual fix: Add missing API link to Ben Allen's release (row 18, timestamp 1758630185)
+          // Manual fix: Add missing links to Ben Allen's release (row 18, timestamp 1758630185)
           if (item.timestamp === '1758630185') {
             item.apiLink = 'https://developer.productboard.com/v2.0.0/reference/introduction';
+            item.screenshotLink = 'https://files.slack.com/files-pri/T0282GCB3-F09ER0KNY0Z/download/screenshot_2025-09-09_at_16.58.39.png';
+            item.slackLink = 'https://productboard.slack.com/files/U098D9A3H6D/F09ER0KNY0Z/screenshot_2025-09-09_at_16.58.39.png';
+            // Remove any "Link missing" stage assignment
+            if (item.stage === 'Link missing') {
+              item.stage = null;
+            }
+          }
+
+          // Manual fix: Add missing Slack link to Linda Czinner's release (timestamp 1758733348)
+          if (item.timestamp === '1758733348') {
+            item.slackLink = 'https://productboard.slack.com/archives/CDN779MA7/p1758733348192889';
           }
 
           // FIXED: Only treat as reply if threadParentId is a timestamp (not a user ID)
@@ -247,8 +258,18 @@ function App() {
   };
 
   const handleAskGemini = async () => {
-    // Placeholder for Gemini integration
-    alert('Gemini integration would be implemented here. This would analyze your releases and provide insights.');
+    // Create a summary of releases for Gemini analysis
+    const releasesSummary = releases.map(r => ({
+      sender: r.sender,
+      date: formatTimestamp(r.timestamp),
+      content: r.mainMessage.replace(/<[^>]*>/g, '').substring(0, 200) + '...',
+      stage: r.stage || 'Unassigned'
+    }));
+    
+    console.log('Analyzing releases with Gemini...', releasesSummary);
+    
+    // Open a new window/tab that could integrate with Gemini
+    window.open('https://gemini.google.com/', '_blank');
   };
 
   useEffect(() => {
