@@ -79,7 +79,7 @@ function App() {
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-    const date = new Date(parseInt(timestamp, 10) * 1000);
+    const date = new Date(parseInt(timestamp.split('.')[0], 10) * 1000);
     if (isNaN(date.getTime())) return "Invalid Date";
     return date.toLocaleString('en-US', {
       year: 'numeric', month: 'long', day: 'numeric',
@@ -133,6 +133,10 @@ function App() {
           const parent = parentReleasesMap.get(reply.threadParentId);
           if (parent) {
             parent.replies.push(reply);
+          } else {
+            // FIX: If a reply's parent isn't found, treat the reply as its own parent message.
+            console.warn(`Orphaned reply found, displaying it as a parent. Parent ID ${reply.threadParentId} not found.`);
+            parentReleasesMap.set(reply.timestamp, { ...reply, replies: [] });
           }
         });
         
@@ -205,7 +209,6 @@ function App() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-col md:flex-row gap-8">
           
-          {/* Main Content Area */}
           <div className="flex-1">
             <div className="mb-6">
               <div className="relative">
@@ -220,9 +223,8 @@ function App() {
                   key={release.timestamp} 
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, release.timestamp)}
-                  className={`relative bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300 ${draggedStage ? 'border-dashed border-2 border-purple-400 scale-105' : 'hover:shadow-md'}`}
+                  className={`relative bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300 ${draggedStage ? 'border-dashed border-2 border-purple-400' : 'hover:shadow-md'}`}
                 >
-                   {/* STAGE TAG DISPLAY */}
                    {release.stage && (
                     <div 
                       className={`absolute top-3 -right-2 px-3 py-1 text-xs font-bold rounded-sm shadow-lg transform rotate-3 border ${stages.find(s => s.name === release.stage)?.color}`}
@@ -284,7 +286,6 @@ function App() {
             </div>
           </div>
           
-          {/* STAGES PANEL - MOVED TO THE RIGHT */}
           <div className="w-full md:w-64">
             <div className="sticky top-8 p-4 bg-white rounded-xl shadow-sm border border-slate-200">
               <h3 className="text-lg font-semibold text-gray-800 mb-3">Stages</h3>
