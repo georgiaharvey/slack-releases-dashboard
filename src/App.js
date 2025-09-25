@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw } from 'lucide-react';
+import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ExternalLink, Paperclip } from 'lucide-react';
 
 const SlackReleasesDashboard = () => {
   console.log('=== ENVIRONMENT CHECK ===');
   console.log('API Key:', process.env.REACT_APP_GOOGLE_SHEETS_API_KEY ? 'EXISTS' : 'MISSING');
   console.log('Sheet ID:', process.env.REACT_APP_GOOGLE_SHEET_ID ? 'EXISTS' : 'MISSING');
-  console.log('Worksheet:', process.env.REACT_APP_GOOGLE_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
-
+  console.log('Worksheet:', process.env.REACT_APP_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
+  
   const [releases, setReleases] = useState([]);
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -16,88 +16,76 @@ const SlackReleasesDashboard = () => {
   const [showChat, setShowChat] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
 
-  const formatSenderName = (name) => {
-    if (!name || typeof name !== 'string') return 'Unknown';
-    // Capitalize names that follow the "first.last" format
-    if (name.includes('.')) {
-      return name
-        .split('.')
-        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
-    }
-    // Capitalize single-word names
-    return name.charAt(0).toUpperCase() + name.slice(1);
-  };
-
-  // --- Improved cleaning of Slack markup for display ---
   const cleanSlackText = (text) => {
-    if (!text) return '';
-
-    let cleaned = text;
-
-    // 1) Convert Slack-style links: <https://url|Label> -> Label, <https://url> -> https://url
-    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2'); // <url|label> -> label
-    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1'); // <url> -> url
-
-    // 2) Remove Slack-style channel mentions completely (e.g., <#C1234|channel>)
-    cleaned = cleaned.replace(/<#\w+\|?[^>]*>/g, '');
-
-    // 3) User mentions <@U12345> -> @user (or remove if you prefer)
-    cleaned = cleaned.replace(/<@[^>]+>/g, '@user');
-
-    // 4) Remove Slack emoji shortcodes like :wave:
-    cleaned = cleaned.replace(/:[a-zA-Z0-9_+\-]+:/g, '');
-
-    // 5) Remove code blocks and inline code
-    cleaned = cleaned.replace(/```[\s\S]*?```/g, ''); // remove fenced blocks
-    cleaned = cleaned.replace(/`([^`]+)`/g, '$1'); // inline code
-
-    // 6) Remove markdown bold/italic markers but keep text
-    cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1'); // **bold**
-    cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');     // *italic or single *
-    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');          // _italic_
-
-    // NEW: Create a paragraph break after a question mark
-    cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
-
-    // 7) Normalize bullet markers and put each on a new line for list formatting
-    // This finds any bullet-like character and replaces it with a newline and a standard '• ' format.
-    cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
+    if (!text) return text;
     
-    // NEW: Bold specific keywords
-    const boldRegex = /(Internal release note|What(?:’|')s new|Why It Matters\?|What(?:’|')s next|Solution|Problem)/gi;
-    cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
-
-    // 8) Final cleanup of all lines, preserving paragraph breaks
-    cleaned = cleaned
-      .split('\n')
-      .map(line => line.trim()) // Trim each line
-      .join('\n') // Re-join with single newlines
-      .replace(/\n{3,}/g, '\n\n') // Collapse 3+ newlines into a standard paragraph break
-      .trim(); // Remove any leading/trailing whitespace from the whole block
-
-    return cleaned;
+    let cleaned = text;
+    
+    // Replace Slack hyperlinks <https://url|label> → label
+    cleaned = cleaned.replace(/<https?:\/\/[^|]+\|([^>]+)>/g, '$1');
+    
+    // Replace bare Slack links <https://url> → url
+    cleaned = cleaned.replace(/<(https?:\/\/[^>]+)>/g, '$1');
+    
+    // Remove Slack emoji codes :wave:
+    cleaned = cleaned.replace(/:[^:\s]*:/g, '');
+    
+    // Replace channel mentions <#C12345|channel> → #channel
+    cleaned = cleaned.replace(/<#[A-Z0-9]+\|([^>]+)>/g, '#$1');
+    
+    // Replace user mentions <@U12345> → @user
+    cleaned = cleaned.replace(/<@([A-Z0-9]+)>/g, '@$1');
+    
+    // AGGRESSIVE asterisk removal - multiple passes to catch all cases
+    // Remove **text**
+    cleaned = cleaned.replace(/\*\*([^*]+?)\*\*/g, '$1');
+    // Remove *text*
+    cleaned = cleaned.replace(/\*([^*]+?)\*/g, '$1');
+    // Remove _text_ (italic markdown)
+    cleaned = cleaned.replace(/_([^_]+?)_/g, '$1');
+    // Remove any leftover asterisks
+    cleaned = cleaned.replace(/\*/g, '');
+    
+    // Process lines for better formatting
+    let lines = cleaned.split('\n');
+    let processedLines = [];
+    
+    for (let line of lines) {
+      line = line.trim();
+      
+      // Skip empty lines
+      if (!line) {
+        processedLines.push('');
+        continue;
+      }
+      
+      // Convert various bullet formats to consistent format
+      if (line.match(/^[•·▪▫◦‣⁃\-\*]/)) {
+        line = '• ' + line.replace(/^[•·▪▫◦‣⁃\-\*]\s*/, '');
+      }
+      
+      // Collapse multiple spaces
+      line = line.replace(/\s+/g, ' ');
+      
+      processedLines.push(line);
+    }
+    
+    // Join lines back together, preserving intentional line breaks
+    cleaned = processedLines.join('\n');
+    
+    // Clean up multiple consecutive newlines (keep max 2)
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+    
+    return cleaned.trim();
   };
 
-  // preserve previous link extraction behavior (returns array of URLs)
   const extractLinks = (text) => {
     if (!text) return [];
+    
     const urlMatches = text.match(/<?(https?:\/\/[^\s>]+)>?/g);
     if (!urlMatches) return [];
+    
     return urlMatches.map(match => match.replace(/[<>]/g, ''));
-  };
-
-  // NEW: Only treat a message as a "reply-to-skip" when the main message is < 200 characters AND there are no detailed notes.
-  // This is the single filtering criterion you asked for.
-  const isTooShortToShow = (messageText, detailedText) => {
-    const main = (messageText || '').trim();
-    const details = (detailedText || '').trim();
-
-    // If main message length is less than 200 and there are no detailed notes, skip it.
-    if (main.length > 0 && main.length < 200 && details.length === 0) return true;
-
-    // Keep everything else
-    return false;
   };
 
   useEffect(() => {
@@ -107,40 +95,64 @@ const SlackReleasesDashboard = () => {
 
   useEffect(() => {
     const filtered = releases.filter(release =>
-      (release.mainMessage || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (release.sender || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (release.detailedNotes || '').toLowerCase().includes(searchTerm.toLowerCase())
+      release.mainMessage.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      release.sender.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      release.detailedNotes.toLowerCase().includes(searchTerm.toLowerCase())
     );
     setFilteredReleases(filtered);
   }, [searchTerm, releases]);
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-    // handle both unix seconds and ISO strings
+    
+    // Check if timestamp is Unix timestamp (number) or date string
     let date;
-    if (/^\d+$/.test(String(timestamp))) {
-      const ts = parseInt(timestamp, 10);
+    if (!isNaN(timestamp)) {
+      // Unix timestamp
+      let ts = parseInt(timestamp);
       date = new Date(ts * 1000);
     } else {
+      // Try parsing as date string
       date = new Date(timestamp);
     }
-    if (isNaN(date.getTime())) return timestamp;
+    
+    if (isNaN(date.getTime())) {
+      return timestamp; // Return original if can't parse
+    }
+    
     return date.toLocaleString('en-US', {
-      year: 'numeric', month: 'long', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short'
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'UTC',
+      timeZoneName: 'short'
     });
+  };
+
+  const formatSenderName = (name) => {
+    if (!name) return 'Unknown';
+    return name
+      .toLowerCase()
+      .split('.')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
   };
 
   const handleGeminiQuery = async (message) => {
     setGeminiLoading(true);
     setChatMessages(prev => [...prev, { role: 'user', content: message }]);
+    
     try {
       await new Promise(resolve => setTimeout(resolve, 1500));
       const mockResponse = `Based on your release data, I can see ${releases.length} releases. What would you like to know about them?`;
+      
       setChatMessages(prev => [...prev, { role: 'assistant', content: mockResponse }]);
     } catch (error) {
       setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
     }
+    
     setGeminiLoading(false);
     setCurrentMessage('');
   };
@@ -154,72 +166,162 @@ const SlackReleasesDashboard = () => {
   const fetchGoogleSheetsData = async () => {
     console.log('fetchGoogleSheetsData called');
     setLoading(true);
-
+    
     try {
       const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
       const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
-      const WORKSHEET = process.env.REACT_APP_GOOGLE_SHEET_NAME || process.env.REACT_APP_GOOGLE_SHEETS_WORKSHEET || 'september';
-
+      const WORKSHEET = process.env.REACT_APP_WORKSHEET_NAME || 'september';
+      const SLACK_WORKSPACE = process.env.REACT_APP_SLACK_WORKSPACE || 'your-workspace';
+      const SLACK_CHANNEL = process.env.REACT_APP_SLACK_CHANNEL || 'C1234567890';
+      
       console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
-
+      
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
       console.log('Fetching URL:', url);
-
+      
       const response = await fetch(url);
       const data = await response.json();
-
+      
       console.log('Google Sheets Response:', data);
-
+      
       if (data.values && data.values.length > 1) {
         const [headers, ...rows] = data.values;
         console.log('Headers:', headers);
-        console.log('Rows count:', rows.length);
-
-        const formattedData = rows.map((row, index) => {
-          const messageText = row[2] || '';
-          const detailedText = row[3] || '';
-
-          // ONLY skip when message is too short and there are no detailed notes
-          if (isTooShortToShow(messageText, detailedText)) {
-            console.log(`Skipping short message at row ${index + 1}: "${String(messageText).slice(0, 80)}"`);
-            return null;
+        console.log('Total rows:', rows.length);
+        
+        // First pass: identify all messages and thread relationships
+        const allMessages = rows.map((row, index) => {
+          const timestamp = row[0] || '';
+          const threadTs = row[6]; // Assuming column 7 has thread_ts
+          
+          return {
+            rowIndex: index,
+            timestamp: timestamp,
+            threadTs: threadTs || timestamp, // If no thread_ts, it's a parent message
+            sender: row[1] || 'Unknown',
+            mainMessage: row[2] || '',
+            detailedNotes: row[3] || '',
+            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' && row[4].trim() !== '' ? row[4].trim() : null,
+            providedSlackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' && row[5].trim() !== '' ? row[5].trim() : null,
+            isReply: threadTs && threadTs !== timestamp
+          };
+        });
+        
+        // Group messages by thread
+        const threadGroups = {};
+        const standaloneMessages = [];
+        
+        allMessages.forEach(msg => {
+          if (!msg.isReply) {
+            // This is a parent message
+            threadGroups[msg.timestamp] = {
+              parent: msg,
+              replies: []
+            };
           }
-
+        });
+        
+        // Add replies to their parent threads
+        allMessages.forEach(msg => {
+          if (msg.isReply && threadGroups[msg.threadTs]) {
+            threadGroups[msg.threadTs].replies.push(msg);
+          } else if (!msg.isReply) {
+            // Already handled as parent
+          } else {
+            // Orphaned reply or standalone message
+            standaloneMessages.push(msg);
+          }
+        });
+        
+        // Format the grouped data
+        const formattedData = [];
+        
+        Object.values(threadGroups).forEach((thread, index) => {
+          const parent = thread.parent;
+          const messageText = parent.mainMessage || '';
+          const detailedText = parent.detailedNotes || '';
+          
+          // Skip if it's just a reply or too short
+          if (messageText.trim().startsWith('<@') || messageText.trim().startsWith('@')) {
+            console.log(`Skipping reply at row ${parent.rowIndex + 1}: ${messageText.substring(0, 50)}...`);
+            return;
+          }
+          
+          if (messageText.length < 50 && !detailedText) {
+            console.log(`Skipping short message at row ${parent.rowIndex + 1}: "${messageText}"`);
+            return;
+          }
+          
+          const lowerMessage = messageText.toLowerCase();
+          const skipPhrases = ['thanks', 'got it', 'looks good', 'awesome', 'great', '+1', 'nice', 'cool'];
+          if (skipPhrases.some(phrase => lowerMessage === phrase || (lowerMessage.length < 100 && lowerMessage.includes(phrase)))) {
+            console.log(`Skipping likely reply at row ${parent.rowIndex + 1}: "${messageText}"`);
+            return;
+          }
+          
+          // Combine replies into the detailed notes
+          let combinedDetailedNotes = cleanSlackText(detailedText) || '';
+          
+          if (thread.replies.length > 0) {
+            const replyTexts = thread.replies.map(reply => {
+              const replySender = formatSenderName(reply.sender);
+              const replyMessage = cleanSlackText(reply.mainMessage);
+              const replyDetails = cleanSlackText(reply.detailedNotes);
+              
+              let replyText = `\n\n**Reply from ${replySender}:**\n${replyMessage}`;
+              if (replyDetails) {
+                replyText += `\n${replyDetails}`;
+              }
+              return replyText;
+            }).join('');
+            
+            combinedDetailedNotes = combinedDetailedNotes + replyTexts;
+          }
+          
+          // Generate Slack link from timestamp if not provided
+          let slackLink = parent.providedSlackLink;
+          if (!slackLink && parent.timestamp) {
+            // Convert timestamp to Slack message link format
+            // Format: https://workspace.slack.com/archives/CHANNEL/pTIMESTAMP
+            const ts = parent.timestamp.replace('.', '');
+            slackLink = `https://${SLACK_WORKSPACE}.slack.com/archives/${SLACK_CHANNEL}/p${ts}`;
+          }
+          
           const item = {
             id: index + 1,
-            timestamp: row[0] || '',
-            sender: formatSenderName(row[1]),
+            timestamp: parent.timestamp,
+            sender: formatSenderName(parent.sender),
             mainMessage: cleanSlackText(messageText) || '',
-            detailedNotes: cleanSlackText(detailedText) || '',
-            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' ? row[4].trim() : null,
-            slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' ? row[5].trim() : null,
-            extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
+            detailedNotes: combinedDetailedNotes,
+            screenshotLink: parent.screenshotLink,
+            slackLink: slackLink,
+            extractedLinks: extractLinks((messageText || '') + ' ' + (detailedText || '')),
+            replyCount: thread.replies.length
           };
-
-          console.log(`Keeping message ${index + 1} by ${item.sender}: ${String(item.mainMessage).slice(0, 80)}...`);
-          return item;
-        }).filter(item => item !== null);
-
+          
+          console.log(`Keeping message ${index + 1} by ${item.sender} with ${item.replyCount} replies`);
+          
+          formattedData.push(item);
+        });
+        
         const sortedData = formattedData.sort((a, b) => {
-          // sort by unix timestamp (if numeric) otherwise by date string
-          const aNum = parseInt(a.timestamp, 10);
-          const bNum = parseInt(b.timestamp, 10);
-          if (!isNaN(aNum) && !isNaN(bNum)) return bNum - aNum;
+          if (!isNaN(a.timestamp) && !isNaN(b.timestamp)) {
+            return parseInt(b.timestamp) - parseInt(a.timestamp);
+          }
           return new Date(b.timestamp) - new Date(a.timestamp);
         });
-
-        console.log('Formatted data:', sortedData);
+        
+        console.log('Formatted data (after filtering and grouping):', sortedData);
+        console.log('Total releases after filtering:', sortedData.length);
         setReleases(sortedData);
         setFilteredReleases(sortedData);
       } else {
         console.log('No data found or empty response');
-        setReleases([]);
-        setFilteredReleases([]);
       }
     } catch (error) {
       console.error('Error fetching Google Sheets data:', error);
     }
-
+    
     setLoading(false);
   };
 
@@ -319,37 +421,101 @@ const SlackReleasesDashboard = () => {
                             href={release.screenshotLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200"
+                            className="flex items-center gap-1 px-3 py-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-blue-200"
                             title="View Screenshot"
                           >
-                            <Image className="w-5 h-5" />
+                            <Paperclip className="w-4 h-4" />
+                            <span className="text-xs font-medium">Screenshot</span>
                           </a>
                         )}
-                        {release.slackLink && (
-                          <a
-                            href={release.slackLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-gray-200"
-                            title="View in Slack"
-                          >
-                            <Link className="w-5 h-5" />
-                          </a>
-                        )}
+                        <a
+                          href={release.slackLink || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-3 py-1.5 text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-purple-200"
+                          title="View in Slack"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                          <span className="text-xs font-medium">Slack</span>
+                          {release.replyCount > 0 && (
+                            <span className="ml-1 text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
+                              {release.replyCount} {release.replyCount === 1 ? 'reply' : 'replies'}
+                            </span>
+                          )}
+                        </a>
+                      </div>
                       </div>
                     </div>
-
+                    
                     <div className="space-y-3">
-                      <h3
-                        className="text-lg font-normal text-gray-900 whitespace-pre-line"
-                        dangerouslySetInnerHTML={{ __html: release.mainMessage }}
-                      />
-
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {release.mainMessage}
+                      </h3>
+                      
                       {release.detailedNotes && (
-                        <div
-                          className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
-                          dangerouslySetInnerHTML={{ __html: release.detailedNotes }}
-                        />
+                        <div className="text-gray-700 leading-relaxed space-y-2">
+                          {release.detailedNotes.split('\n\n').map((paragraph, pIdx) => {
+                            // Check if this is a reply section
+                            if (paragraph.startsWith('**Reply from')) {
+                              const lines = paragraph.split('\n');
+                              const replyHeader = lines[0];
+                              const replyContent = lines.slice(1).join('\n');
+                              
+                              return (
+                                <div key={pIdx} className="mt-4 p-3 bg-gray-50 rounded-lg border-l-4 border-purple-300">
+                                  <p className="text-sm font-semibold text-purple-700 mb-1">
+                                    {replyHeader.replace(/\*\*/g, '')}
+                                  </p>
+                                  <div className="text-gray-700">
+                                    {replyContent.split('\n').map((line, lIdx) => {
+                                      if (line.startsWith('• ')) {
+                                        return (
+                                          <div key={lIdx} className="flex items-start ml-2">
+                                            <span className="mr-2">•</span>
+                                            <span>{line.substring(2)}</span>
+                                          </div>
+                                        );
+                                      } else if (line.trim()) {
+                                        return <p key={lIdx}>{line}</p>;
+                                      }
+                                      return null;
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            
+                            // Check if this paragraph contains bullet points
+                            const lines = paragraph.split('\n');
+                            const hasBullets = lines.some(line => line.startsWith('• '));
+                            
+                            if (hasBullets) {
+                              // Render as a bullet list
+                              return (
+                                <ul key={pIdx} className="space-y-1 ml-4">
+                                  {lines.map((line, lIdx) => {
+                                    if (line.startsWith('• ')) {
+                                      return (
+                                        <li key={lIdx} className="flex items-start">
+                                          <span className="mr-2">•</span>
+                                          <span>{line.substring(2)}</span>
+                                        </li>
+                                      );
+                                    } else if (line.trim()) {
+                                      // Non-bullet line in a bullet section
+                                      return <div key={lIdx} className="ml-6">{line}</div>;
+                                    }
+                                    return null;
+                                  })}
+                                </ul>
+                              );
+                            } else if (paragraph.trim()) {
+                              // Regular paragraph
+                              return <p key={pIdx}>{paragraph}</p>;
+                            }
+                            return null;
+                          })}
+                        </div>
                       )}
 
                       {release.extractedLinks && release.extractedLinks.length > 0 && (
@@ -375,7 +541,7 @@ const SlackReleasesDashboard = () => {
                   </div>
                 </div>
               ))}
-
+              
               {filteredReleases.length === 0 && (
                 <div className="text-center py-12">
                   <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -394,7 +560,7 @@ const SlackReleasesDashboard = () => {
                 </div>
                 <p className="text-sm text-gray-600 mt-1">Ask questions about your releases</p>
               </div>
-
+              
               <div className="h-96 overflow-y-auto p-4">
                 {chatMessages.length === 0 ? (
                   <div className="text-center text-gray-500 mt-8">
@@ -406,8 +572,8 @@ const SlackReleasesDashboard = () => {
                     {chatMessages.map((msg, idx) => (
                       <div key={idx} className={msg.role === 'user' ? 'ml-4' : 'mr-4'}>
                         <div className={`p-3 rounded-lg ${
-                          msg.role === 'user'
-                            ? 'bg-blue-600 text-white ml-auto'
+                          msg.role === 'user' 
+                            ? 'bg-blue-600 text-white ml-auto' 
                             : 'bg-gray-100 text-gray-900'
                         }`}>
                           <p className="text-sm">{msg.content}</p>
@@ -428,7 +594,7 @@ const SlackReleasesDashboard = () => {
                   </div>
                 )}
               </div>
-
+              
               <div className="p-4 border-t border-slate-200">
                 <div className="flex space-x-2">
                   <input
@@ -443,7 +609,7 @@ const SlackReleasesDashboard = () => {
                   <button
                     onClick={handleSendMessage}
                     disabled={geminiLoading || !currentMessage.trim()}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Send
                   </button>
