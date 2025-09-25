@@ -255,7 +255,7 @@ const SlackReleasesDashboard = () => {
                         >
                           <span className="flex items-center">
                             <MessageCircle className="w-4 h-4 mr-2" />
-                            View {release.replies.length} {release.replies.length > 1 ? 'Updates' : 'Update'}
+                            View {release.replies.length} {release.replies.length > 1 ? 'Updates/Feedback' : 'Update/Feedback'}
                           </span>
                           <ChevronDown className={`w-5 h-5 transition-transform ${openReplies[release.timestamp] ? 'rotate-180' : ''}`} />
                         </button>
@@ -276,11 +276,6 @@ const SlackReleasesDashboard = () => {
                                   className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
                                   dangerouslySetInnerHTML={{ __html: reply.mainMessage }}
                                 />
-                                {reply.screenshotLink && (
-                                  <a href={reply.screenshotLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-blue-500 hover:text-blue-700 hover:underline text-sm mt-2">
-                                    <Image className="w-4 h-4 mr-1" /> View Update Screenshot
-                                  </a>
-                                )}
                               </div>
                             ))}
                           </div>
