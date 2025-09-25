@@ -1,227 +1,199 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw } from 'lucide-react';
+import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle } from 'lucide-react';
 
-const SlackReleasesDashboard = () => {
-  console.log('=== ENVIRONMENT CHECK ===');
-  console.log('API Key:', process.env.REACT_APP_GOOGLE_SHEETS_API_KEY ? 'EXISTS' : 'MISSING');
-  console.log('Sheet ID:', process.env.REACT_APP_GOOGLE_SHEET_ID ? 'EXISTS' : 'MISSING');
-  console.log('Worksheet:', process.env.REACT_APP_GOOGLE_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
-
+function App() {
   const [releases, setReleases] = useState([]);
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
-  const [chatMessages, setChatMessages] = useState([]);
-  const [currentMessage, setCurrentMessage] = useState('');
-  const [showChat, setShowChat] = useState(false);
-  const [geminiLoading, setGeminiLoading] = useState(false);
+  const [openReplies, setOpenReplies] = useState({});
+  const [draggedStage, setDraggedStage] = useState(null);
+
+  // --- Drag and Drop Handlers ---
+  const handleDragStart = (e, stageName) => {
+    e.dataTransfer.setData("stageName", stageName);
+    setDraggedStage(stageName);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedStage(null);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e, releaseTimestamp) => {
+    e.preventDefault();
+    const stageName = e.dataTransfer.getData("stageName");
+    
+    setReleases(prevReleases => 
+      prevReleases.map(release => 
+        release.timestamp === releaseTimestamp 
+          ? { ...release, stage: stageName } 
+          : release
+      )
+    );
+    setDraggedStage(null);
+  };
+
+  const toggleReplies = (timestamp) => {
+    setOpenReplies(prev => ({ ...prev, [timestamp]: !prev[timestamp] }));
+  };
 
   const formatSenderName = (name) => {
     if (!name || typeof name !== 'string') return 'Unknown';
-    // Capitalize names that follow the "first.last" format
     if (name.includes('.')) {
-      return name
-        .split('.')
-        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
+      return name.split('.').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
     }
-    // Capitalize single-word names
     return name.charAt(0).toUpperCase() + name.slice(1);
   };
 
-  // --- Improved cleaning of Slack markup for display ---
+  const getValidUrl = (url) => {
+    if (!url || typeof url !== 'string') return null;
+    const trimmedUrl = url.trim();
+    if (trimmedUrl === '' || trimmedUrl.toLowerCase() === 'null') return null;
+    if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) return trimmedUrl;
+    return null;
+  };
+
   const cleanSlackText = (text) => {
     if (!text) return '';
-
     let cleaned = text;
-
-    // 1) Convert Slack-style links: <https://url|Label> -> Label, <https://url> -> https://url
-    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2'); // <url|label> -> label
-    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1'); // <url> -> url
-
-    // 2) Remove Slack-style channel mentions completely (e.g., <#C1234|channel>)
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2');
+    cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1');
     cleaned = cleaned.replace(/<#\w+\|?[^>]*>/g, '');
-
-    // 3) User mentions <@U12345> -> @user (or remove if you prefer)
     cleaned = cleaned.replace(/<@[^>]+>/g, '@user');
-
-    // 4) Remove Slack emoji shortcodes like :wave:
     cleaned = cleaned.replace(/:[a-zA-Z0-9_+\-]+:/g, '');
-
-    // 5) Remove code blocks and inline code
-    cleaned = cleaned.replace(/```[\s\S]*?```/g, ''); // remove fenced blocks
-    cleaned = cleaned.replace(/`([^`]+)`/g, '$1'); // inline code
-
-    // 6) Remove markdown bold/italic markers but keep text
-    cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1'); // **bold**
-    cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');     // *italic or single *
-    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');          // _italic_
-
-    // NEW: Create a paragraph break after a question mark
+    cleaned = cleaned.replace(/```[\s\S]*?```/g, '');
+    cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+    cleaned = cleaned.replace(/\*\*([\s\S]*?)\*\*/g, '$1');
+    cleaned = cleaned.replace(/\*([\s\S]*?)\*/g, '$1');
+    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
     cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
-
-    // 7) Normalize bullet markers and put each on a new line for list formatting
-    // This finds any bullet-like character and replaces it with a newline and a standard '• ' format.
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
-    
-    // NEW: Bold specific keywords
-    const boldRegex = /(Internal release note|What(?:’|')s new|Why It Matters\?|What(?:’|')s next|Solution|Problem)/gi;
+    const boldRegex = /(Internal release note|What(?:'|')s new|Why It Matters\?|What(?:'|')s next|Solution|Problem)/gi;
     cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
-
-    // 8) Final cleanup of all lines, preserving paragraph breaks
-    cleaned = cleaned
-      .split('\n')
-      .map(line => line.trim()) // Trim each line
-      .join('\n') // Re-join with single newlines
-      .replace(/\n{3,}/g, '\n\n') // Collapse 3+ newlines into a standard paragraph break
-      .trim(); // Remove any leading/trailing whitespace from the whole block
-
-    return cleaned;
+    return cleaned.split('\n').map(line => line.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   };
-
-  // preserve previous link extraction behavior (returns array of URLs)
-  const extractLinks = (text) => {
-    if (!text) return [];
-    const urlMatches = text.match(/<?(https?:\/\/[^\s>]+)>?/g);
-    if (!urlMatches) return [];
-    return urlMatches.map(match => match.replace(/[<>]/g, ''));
-  };
-
-  // NEW: Only treat a message as a "reply-to-skip" when the main message is < 200 characters AND there are no detailed notes.
-  // This is the single filtering criterion you asked for.
-  const isTooShortToShow = (messageText, detailedText) => {
-    const main = (messageText || '').trim();
-    const details = (detailedText || '').trim();
-
-    // If main message length is less than 200 and there are no detailed notes, skip it.
-    if (main.length > 0 && main.length < 200 && details.length === 0) return true;
-
-    // Keep everything else
-    return false;
-  };
-
-  useEffect(() => {
-    console.log('Component mounted, fetching Google Sheets data...');
-    fetchGoogleSheetsData();
-  }, []);
-
-  useEffect(() => {
-    const filtered = releases.filter(release =>
-      (release.mainMessage || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (release.sender || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (release.detailedNotes || '').toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    setFilteredReleases(filtered);
-  }, [searchTerm, releases]);
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-    // handle both unix seconds and ISO strings
-    let date;
-    if (/^\d+$/.test(String(timestamp))) {
-      const ts = parseInt(timestamp, 10);
-      date = new Date(ts * 1000);
-    } else {
-      date = new Date(timestamp);
-    }
-    if (isNaN(date.getTime())) return timestamp;
+    // Timestamps from Slack are in seconds with microseconds, so we split at the '.'
+    const date = new Date(parseInt(timestamp.split('.')[0], 10) * 1000);
+    if (isNaN(date.getTime())) return "Invalid Date";
     return date.toLocaleString('en-US', {
       year: 'numeric', month: 'long', day: 'numeric',
       hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short'
     });
   };
-
-  const handleGeminiQuery = async (message) => {
-    setGeminiLoading(true);
-    setChatMessages(prev => [...prev, { role: 'user', content: message }]);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const mockResponse = `Based on your release data, I can see ${releases.length} releases. What would you like to know about them?`;
-      setChatMessages(prev => [...prev, { role: 'assistant', content: mockResponse }]);
-    } catch (error) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
-    }
-    setGeminiLoading(false);
-    setCurrentMessage('');
+  
+  // Changed back to 200 characters minimum as requested
+  const isTooShortToShow = (messageText) => {
+    const main = (messageText || '').trim();
+    return main.length > 0 && main.length < 200;
   };
-
-  const handleSendMessage = () => {
-    if (currentMessage.trim()) {
-      handleGeminiQuery(currentMessage.trim());
-    }
-  };
-
+  
   const fetchGoogleSheetsData = async () => {
-    console.log('fetchGoogleSheetsData called');
     setLoading(true);
-
     try {
       const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
       const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
-      const WORKSHEET = process.env.REACT_APP_GOOGLE_SHEET_NAME || process.env.REACT_APP_GOOGLE_SHEETS_WORKSHEET || 'september';
-
-      console.log('Using values:', { API_KEY: API_KEY ? 'SET' : 'MISSING', SHEET_ID, WORKSHEET });
-
+      const WORKSHEET = process.env.REACT_APP_GOOGLE_SHEET_NAME || 'september';
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
-      console.log('Fetching URL:', url);
-
       const response = await fetch(url);
       const data = await response.json();
 
-      console.log('Google Sheets Response:', data);
-
       if (data.values && data.values.length > 1) {
         const [headers, ...rows] = data.values;
-        console.log('Headers:', headers);
-        console.log('Rows count:', rows.length);
-
-        const formattedData = rows.map((row, index) => {
-          const messageText = row[2] || '';
-          const detailedText = row[3] || '';
-
-          // ONLY skip when message is too short and there are no detailed notes
-          if (isTooShortToShow(messageText, detailedText)) {
-            console.log(`Skipping short message at row ${index + 1}: "${String(messageText).slice(0, 80)}"`);
-            return null;
-          }
-
-          const item = {
-            id: index + 1,
-            timestamp: row[0] || '',
-            sender: formatSenderName(row[1]),
-            mainMessage: cleanSlackText(messageText) || '',
-            detailedNotes: cleanSlackText(detailedText) || '',
-            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' ? row[4].trim() : null,
-            slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' ? row[5].trim() : null,
-            extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
+        const allItems = rows.map(row => {
+          if (!row[0]) return null;
+          return {
+            timestamp: row[0],
+            sender: formatSenderName(row[1] || 'Unknown'),
+            mainMessage: row[2] || '',
+            detailedNotes: row[3] || '',
+            screenshotLink: getValidUrl(row[4]),
+            slackLink: getValidUrl(row[5]),
+            threadParentId: row[6] || null,
+            stage: row[7] || null,
           };
-
-          console.log(`Keeping message ${index + 1} by ${item.sender}: ${String(item.mainMessage).slice(0, 80)}...`);
-          return item;
         }).filter(item => item !== null);
 
-        const sortedData = formattedData.sort((a, b) => {
-          // sort by unix timestamp (if numeric) otherwise by date string
-          const aNum = parseInt(a.timestamp, 10);
-          const bNum = parseInt(b.timestamp, 10);
-          if (!isNaN(aNum) && !isNaN(bNum)) return bNum - aNum;
-          return new Date(b.timestamp) - new Date(a.timestamp);
+        const parentReleasesMap = new Map();
+        const replies = [];
+
+        allItems.forEach(item => {
+          // FIXED: Only treat as reply if threadParentId is a timestamp (not a user ID)
+          // Check if threadParentId looks like a timestamp (numeric) and differs from the message timestamp
+          const isReply = item.threadParentId && 
+                         item.threadParentId !== item.timestamp && 
+                         /^\d+/.test(item.threadParentId); // Check if it starts with digits (timestamp format)
+          
+          if (isReply) {
+            replies.push(item);
+          } else {
+            parentReleasesMap.set(item.timestamp, { ...item, replies: [] });
+          }
         });
 
-        console.log('Formatted data:', sortedData);
+        replies.forEach(reply => {
+          const parent = parentReleasesMap.get(reply.threadParentId);
+          if (parent) {
+            parent.replies.push(reply);
+          } else {
+            // If a reply's parent isn't found, treat the reply as its own parent message.
+            parentReleasesMap.set(reply.timestamp, { ...reply, replies: [] });
+          }
+        });
+        
+        const processedParentReleases = Array.from(parentReleasesMap.values())
+          .map(parent => ({
+            ...parent,
+            mainMessage: cleanSlackText(parent.mainMessage),
+            detailedNotes: cleanSlackText(parent.detailedNotes),
+            replies: parent.replies.map(r => ({...r, mainMessage: cleanSlackText(r.mainMessage)})).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
+          }))
+          // This filter keeps everything that is NOT too short (i.e., >= 200 characters)
+          .filter(parent => !isTooShortToShow(parent.mainMessage));
+
+        const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
+        
+        console.log(`Loaded ${sortedData.length} releases (filtered from ${allItems.length} total items)`);
         setReleases(sortedData);
-        setFilteredReleases(sortedData);
       } else {
-        console.log('No data found or empty response');
         setReleases([]);
-        setFilteredReleases([]);
       }
     } catch (error) {
       console.error('Error fetching Google Sheets data:', error);
     }
-
     setLoading(false);
   };
+
+  useEffect(() => {
+    fetchGoogleSheetsData();
+  }, []);
+
+  useEffect(() => {
+    setFilteredReleases(releases);
+  }, [releases]);
+
+  useEffect(() => {
+    const filtered = releases.filter(release => {
+        const searchTermLower = searchTerm.toLowerCase();
+        const inMainMessage = (release.mainMessage || '').toLowerCase().includes(searchTermLower);
+        const inSender = (release.sender || '').toLowerCase().includes(searchTermLower);
+        const inReplies = release.replies && release.replies.some(reply => (reply.mainMessage || '').toLowerCase().includes(searchTermLower));
+        return inMainMessage || inSender || inReplies;
+    });
+    setFilteredReleases(filtered);
+  }, [searchTerm, releases]);
+
+  const stages = [
+    { name: 'Internal', color: 'bg-blue-200 text-blue-800 border-blue-300' },
+    { name: 'GA', color: 'bg-green-200 text-green-800 border-green-300' },
+    { name: 'ENT Exclusion', color: 'bg-yellow-200 text-yellow-800 border-yellow-300' }
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -233,20 +205,11 @@ const SlackReleasesDashboard = () => {
               <p className="text-gray-600 mt-1">Track and analyze your team's release communications</p>
             </div>
             <div className="flex space-x-3">
-              <button
-                onClick={fetchGoogleSheetsData}
-                disabled={loading}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh Data
+              <button onClick={fetchGoogleSheetsData} disabled={loading} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Refresh Data
               </button>
-              <button
-                onClick={() => setShowChat(!showChat)}
-                className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
-                <Sparkles className="w-4 h-4 mr-2" />
-                Ask Gemini
+              <button className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                <Sparkles className="w-4 h-4 mr-2" /> Ask Gemini
               </button>
             </div>
           </div>
@@ -254,21 +217,17 @@ const SlackReleasesDashboard = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex gap-8">
-          <div className={`flex-1 ${showChat ? 'mr-0' : ''}`}>
+        <div className="flex flex-col md:flex-row gap-8">
+          
+          <div className="flex-1">
             <div className="mb-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  placeholder="Search releases, messages, or team members..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+                <input type="text" placeholder="Search releases, messages, or team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"/>
               </div>
             </div>
 
+            {/* ADDED: Statistics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center">
@@ -301,160 +260,96 @@ const SlackReleasesDashboard = () => {
 
             <div className="space-y-6">
               {filteredReleases.map((release) => (
-                <div key={release.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div 
+                  key={release.timestamp} 
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, release.timestamp)}
+                  className={`relative bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300 ${draggedStage ? 'border-dashed border-2 border-purple-400' : 'hover:shadow-md'}`}
+                >
+                   {release.stage && (
+                    <div 
+                      className={`absolute top-3 -right-2 px-3 py-1 text-xs font-bold rounded-sm shadow-lg transform rotate-3 border ${stages.find(s => s.name === release.stage)?.color}`}
+                    >
+                      {release.stage}
+                    </div>
+                  )}
+
                   <div className="p-6">
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">
-                          {release.sender.charAt(0).toUpperCase()}
-                        </div>
+                        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">{release.sender.charAt(0).toUpperCase()}</div>
                         <div>
                           <p className="font-semibold text-gray-900">{release.sender}</p>
                           <p className="text-sm text-gray-500">{formatTimestamp(release.timestamp)}</p>
                         </div>
                       </div>
                       <div className="flex space-x-2">
-                        {release.screenshotLink && (
-                          <a
-                            href={release.screenshotLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200"
-                            title="View Screenshot"
-                          >
-                            <Image className="w-5 h-5" />
-                          </a>
-                        )}
-                        {release.slackLink && (
-                          <a
-                            href={release.slackLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-gray-200"
-                            title="View in Slack"
-                          >
-                            <Link className="w-5 h-5" />
-                          </a>
-                        )}
+                        {release.screenshotLink && (<a href={release.screenshotLink} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200" title="View Screenshot"><Image className="w-5 h-5" /></a>)}
+                        {release.slackLink && (<a href={release.slackLink} target="_blank" rel="noopener noreferrer" className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-gray-200" title="View in Slack"><Link className="w-5 h-5" /></a>)}
                       </div>
                     </div>
 
                     <div className="space-y-3">
-                      <h3
-                        className="text-lg font-normal text-gray-900 whitespace-pre-line"
-                        dangerouslySetInnerHTML={{ __html: release.mainMessage }}
-                      />
+                      <div className="text-lg font-normal text-gray-900 whitespace-pre-line" dangerouslySetInnerHTML={{ __html: release.mainMessage }} />
+                      {release.detailedNotes && <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words" dangerouslySetInnerHTML={{ __html: release.detailedNotes }} />}
+                    </div>
 
-                      {release.detailedNotes && (
-                        <div
-                          className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
-                          dangerouslySetInnerHTML={{ __html: release.detailedNotes }}
-                        />
-                      )}
-
-                      {release.extractedLinks && release.extractedLinks.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <p className="text-sm font-medium text-gray-600 mb-2">Links:</p>
-                          <div className="flex flex-wrap gap-2">
-                            {release.extractedLinks.map((link, idx) => (
-                              <a
-                                key={idx}
-                                href={link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                              >
-                                <Link className="w-3 h-3 mr-1" />
-                                {link.length > 40 ? `${link.substring(0, 40)}...` : link}
-                              </a>
+                    {release.replies && release.replies.length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-slate-100">
+                        <button onClick={() => toggleReplies(release.timestamp)} className="flex items-center justify-between w-full text-left text-sm font-medium text-purple-600 hover:text-purple-800">
+                          <span className="flex items-center">
+                            <MessageCircle className="w-4 h-4 mr-2" />
+                            View {release.replies.length} {release.replies.length > 1 ? 'Updates' : 'Update'}
+                          </span>
+                          <ChevronDown className={`w-5 h-5 transition-transform ${openReplies[release.timestamp] ? 'rotate-180' : ''}`} />
+                        </button>
+                        {openReplies[release.timestamp] && (
+                          <div className="mt-4 pl-6 border-l-2 border-slate-200 space-y-6">
+                            {release.replies.map(reply => (
+                              <div key={reply.timestamp}>
+                                <div className="flex items-center space-x-3 mb-2">
+                                  <div className="w-8 h-8 bg-gradient-to-r from-slate-400 to-slate-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">{reply.sender.charAt(0).toUpperCase()}</div>
+                                  <div>
+                                    <p className="font-semibold text-gray-800 text-sm">{reply.sender}</p>
+                                    <p className="text-xs text-gray-500">{formatTimestamp(reply.timestamp)}</p>
+                                  </div>
+                                </div>
+                                <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words" dangerouslySetInnerHTML={{ __html: reply.mainMessage }} />
+                              </div>
                             ))}
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {filteredReleases.length === 0 && (
-                <div className="text-center py-12">
-                  <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No releases found matching your search.</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {showChat && (
-            <div className="w-96 bg-white rounded-xl shadow-sm border border-slate-200 h-fit">
-              <div className="p-4 border-b border-slate-200">
-                <div className="flex items-center space-x-2">
-                  <Sparkles className="w-5 h-5 text-purple-600" />
-                  <h3 className="font-semibold text-gray-900">Ask Gemini</h3>
-                </div>
-                <p className="text-sm text-gray-600 mt-1">Ask questions about your releases</p>
-              </div>
-
-              <div className="h-96 overflow-y-auto p-4">
-                {chatMessages.length === 0 ? (
-                  <div className="text-center text-gray-500 mt-8">
-                    <Sparkles className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>Start a conversation with Gemini about your release data!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {chatMessages.map((msg, idx) => (
-                      <div key={idx} className={msg.role === 'user' ? 'ml-4' : 'mr-4'}>
-                        <div className={`p-3 rounded-lg ${
-                          msg.role === 'user'
-                            ? 'bg-blue-600 text-white ml-auto'
-                            : 'bg-gray-100 text-gray-900'
-                        }`}>
-                          <p className="text-sm">{msg.content}</p>
-                        </div>
-                      </div>
-                    ))}
-                    {geminiLoading && (
-                      <div className="mr-4">
-                        <div className="bg-gray-100 text-gray-900 p-3 rounded-lg">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                          </div>
-                        </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-
-              <div className="p-4 border-t border-slate-200">
-                <div className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={currentMessage}
-                    onChange={(e) => setCurrentMessage(e.target.value)}
-                    placeholder="Ask about your releases..."
-                    disabled={geminiLoading}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                  />
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={geminiLoading || !currentMessage.trim()}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
-                  >
-                    Send
-                  </button>
                 </div>
+              ))}
+            </div>
+          </div>
+          
+          <div className="w-full md:w-64">
+            <div className="sticky top-8 p-4 bg-white rounded-xl shadow-sm border border-slate-200">
+              <h3 className="text-lg font-semibold text-gray-800 mb-3">Stages</h3>
+              <p className="text-sm text-gray-500 mb-4">Drag a stage onto a release card.</p>
+              <div className="space-y-3">
+                {stages.map(stage => (
+                  <div 
+                    key={stage.name}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, stage.name)}
+                    onDragEnd={handleDragEnd}
+                    className={`p-4 rounded-lg font-semibold cursor-grab transition-opacity shadow-md hover:shadow-lg transform hover:-translate-y-1 ${stage.color} ${draggedStage === stage.name ? 'opacity-50 scale-105' : 'opacity-100'}`}
+                  >
+                    {stage.name}
+                  </div>
+                ))}
               </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
   );
-};
+}
 
-export default SlackReleasesDashboard;
+export default App;
