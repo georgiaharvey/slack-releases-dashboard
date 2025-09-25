@@ -79,6 +79,7 @@ function App() {
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
+    // Timestamps from Slack are in seconds with microseconds, so we split at the '.'
     const date = new Date(parseInt(timestamp.split('.')[0], 10) * 1000);
     if (isNaN(date.getTime())) return "Invalid Date";
     return date.toLocaleString('en-US', {
@@ -87,6 +88,7 @@ function App() {
     });
   };
   
+  // This function checks if a message is UNDER 200 characters.
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
     return main.length > 0 && main.length < 200;
@@ -134,8 +136,7 @@ function App() {
           if (parent) {
             parent.replies.push(reply);
           } else {
-            // FIX: If a reply's parent isn't found, treat the reply as its own parent message.
-            console.warn(`Orphaned reply found, displaying it as a parent. Parent ID ${reply.threadParentId} not found.`);
+            // If a reply's parent isn't found, treat the reply as its own parent message.
             parentReleasesMap.set(reply.timestamp, { ...reply, replies: [] });
           }
         });
@@ -147,6 +148,7 @@ function App() {
             detailedNotes: cleanSlackText(parent.detailedNotes),
             replies: parent.replies.map(r => ({...r, mainMessage: cleanSlackText(r.mainMessage)})).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
           }))
+          // This filter keeps everything that is NOT too short (i.e., >= 200 characters)
           .filter(parent => !isTooShortToShow(parent.mainMessage));
 
         const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
