@@ -333,7 +333,7 @@ function App() {
                         <Info className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer" />
                         {showInfo && (
                           <div className="absolute z-10 left-0 top-6 bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap">
-                            Since November 17, 2025
+                            Since September 25, 2025
                           </div>
                         )}
                       </button>
