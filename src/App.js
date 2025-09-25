@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle, ExternalLink } from 'lucide-react';
+import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle, ExternalLink, Info } from 'lucide-react';
 
 function App() {
   const [releases, setReleases] = useState([]);
@@ -8,6 +8,10 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [openReplies, setOpenReplies] = useState({});
   const [draggedStage, setDraggedStage] = useState(null);
+  const [stageAssignments, setStageAssignments] = useState({});
+  const [selectedDateFilter, setSelectedDateFilter] = useState('all');
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // --- Drag and Drop Handlers ---
   const handleDragStart = (e, stageName) => {
@@ -27,6 +31,12 @@ function App() {
     e.preventDefault();
     const stageName = e.dataTransfer.getData("stageName");
     
+    // Update persistent stage assignments
+    setStageAssignments(prev => ({
+      ...prev,
+      [releaseTimestamp]: stageName
+    }));
+    
     setReleases(prevReleases => 
       prevReleases.map(release => 
         release.timestamp === releaseTimestamp 
@@ -35,6 +45,23 @@ function App() {
       )
     );
     setDraggedStage(null);
+  };
+
+  // Remove stage assignment
+  const removeStageAssignment = (releaseTimestamp) => {
+    setStageAssignments(prev => {
+      const newAssignments = { ...prev };
+      delete newAssignments[releaseTimestamp];
+      return newAssignments;
+    });
+    
+    setReleases(prevReleases => 
+      prevReleases.map(release => 
+        release.timestamp === releaseTimestamp 
+          ? { ...release, stage: null } 
+          : release
+      )
+    );
   };
 
   const toggleReplies = (timestamp) => {
@@ -88,10 +115,34 @@ function App() {
     });
   };
   
-  // Changed back to 200 characters minimum as requested
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
     return main.length > 0 && main.length < 200;
+  };
+
+  const filterByDate = (releases, filterType) => {
+    if (filterType === 'all') return releases;
+    
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    return releases.filter(release => {
+      const releaseDate = new Date(parseInt(release.timestamp.split('.')[0], 10) * 1000);
+      
+      switch (filterType) {
+        case 'today':
+          const releaseDateOnly = new Date(releaseDate.getFullYear(), releaseDate.getMonth(), releaseDate.getDate());
+          return releaseDateOnly.getTime() === today.getTime();
+        case 'week':
+          const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+          return releaseDate >= weekAgo;
+        case 'month':
+          const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+          return releaseDate >= monthAgo;
+        default:
+          return true;
+      }
+    });
   };
   
   const fetchGoogleSheetsData = async () => {
@@ -124,17 +175,14 @@ function App() {
         const replies = [];
 
         allItems.forEach(item => {
+          // REMOVE: Niall Cochrane release (timestamp 1758810522) entirely
+          if (item.timestamp === '1758810522') {
+            return; // Skip this item completely
+          }
+
           // Manual fix: Force row 17 (timestamp 1758713492) to be a reply to row 19 (timestamp 1758713371)
           if (item.timestamp === '1758713492') {
             item.threadParentId = '1758713371';
-          }
-          
-          // Manual fix: Force row 22 (timestamp 1758810522) to show
-          if (item.timestamp === '1758810522') {
-            // Force it to not be filtered out by treating it as long enough
-            if (item.mainMessage.length < 200) {
-              item.mainMessage = item.mainMessage + " [Manual override: this release has been manually included]";
-            }
           }
           
           // Manual fix: Add missing API link to Ben Allen's release (row 18, timestamp 1758630185)
@@ -166,16 +214,21 @@ function App() {
         });
         
         const processedParentReleases = Array.from(parentReleasesMap.values())
-          .map(parent => ({
-            ...parent,
-            mainMessage: cleanSlackText(parent.mainMessage),
-            detailedNotes: cleanSlackText(parent.detailedNotes),
-            replies: parent.replies.map(r => ({...r, mainMessage: cleanSlackText(r.mainMessage)})).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
-          }))
-          // Manual fix: Don't filter out row 18 (timestamp 1758630185) and row 22 (timestamp 1758810522)
+          .map(parent => {
+            // Apply persistent stage assignments
+            const persistentStage = stageAssignments[parent.timestamp];
+            return {
+              ...parent,
+              stage: persistentStage || parent.stage,
+              mainMessage: cleanSlackText(parent.mainMessage),
+              detailedNotes: cleanSlackText(parent.detailedNotes),
+              replies: parent.replies.map(r => ({...r, mainMessage: cleanSlackText(r.mainMessage)})).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
+            };
+          })
+          // Manual fix: Don't filter out row 18 (timestamp 1758630185)
           .filter(parent => {
-            if (parent.timestamp === '1758630185' || parent.timestamp === '1758810522') {
-              return true; // Force include these releases
+            if (parent.timestamp === '1758630185') {
+              return true; // Force include this release
             }
             return !isTooShortToShow(parent.mainMessage);
           });
@@ -193,24 +246,26 @@ function App() {
     setLoading(false);
   };
 
+  const handleAskGemini = async () => {
+    // Placeholder for Gemini integration
+    alert('Gemini integration would be implemented here. This would analyze your releases and provide insights.');
+  };
+
   useEffect(() => {
     fetchGoogleSheetsData();
   }, []);
 
   useEffect(() => {
-    setFilteredReleases(releases);
-  }, [releases]);
-
-  useEffect(() => {
-    const filtered = releases.filter(release => {
+    const dateFiltered = filterByDate(releases, selectedDateFilter);
+    const searchFiltered = dateFiltered.filter(release => {
         const searchTermLower = searchTerm.toLowerCase();
         const inMainMessage = (release.mainMessage || '').toLowerCase().includes(searchTermLower);
         const inSender = (release.sender || '').toLowerCase().includes(searchTermLower);
         const inReplies = release.replies && release.replies.some(reply => (reply.mainMessage || '').toLowerCase().includes(searchTermLower));
         return inMainMessage || inSender || inReplies;
     });
-    setFilteredReleases(filtered);
-  }, [searchTerm, releases]);
+    setFilteredReleases(searchFiltered);
+  }, [searchTerm, releases, selectedDateFilter]);
 
   const stages = [
     { name: 'Internal', color: 'bg-blue-200 text-blue-800 border-blue-300' },
@@ -231,7 +286,7 @@ function App() {
               <button onClick={fetchGoogleSheetsData} disabled={loading} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Refresh Data
               </button>
-              <button className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+              <button onClick={handleAskGemini} className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
                 <Sparkles className="w-4 h-4 mr-2" /> Ask Gemini
               </button>
             </div>
@@ -256,11 +311,22 @@ function App() {
                 <div className="flex items-center">
                   <MessageSquare className="w-8 h-8 text-blue-600" />
                   <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Total Releases</p>
-                    <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Last updated: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
+                    <div className="flex items-center">
+                      <p className="text-sm font-medium text-gray-600">Total Releases</p>
+                      <div className="relative ml-2">
+                        <Info 
+                          className="w-4 h-4 text-gray-400 cursor-help" 
+                          onMouseEnter={() => setShowTooltip(true)}
+                          onMouseLeave={() => setShowTooltip(false)}
+                        />
+                        {showTooltip && (
+                          <div className="absolute bottom-6 left-0 bg-black text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+                            Since September 17, 2025
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-2xl font-bold text-gray-900">{filteredReleases.length}</p>
                   </div>
                 </div>
               </div>
@@ -269,22 +335,44 @@ function App() {
                   <User className="w-8 h-8 text-green-600" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">Active Contributors</p>
-                    <p className="text-2xl font-bold text-gray-900">{new Set(releases.map(r => r.sender)).size}</p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Unique team members
-                    </p>
+                    <p className="text-2xl font-bold text-gray-900">{new Set(filteredReleases.map(r => r.sender)).size}</p>
                   </div>
                 </div>
               </div>
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center">
-                  <Calendar className="w-8 h-8 text-purple-600" />
+                  <Calendar className="w-8 h-8 text-purple-600 cursor-pointer" onClick={() => setShowDatePicker(!showDatePicker)} />
                   <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">This Month</p>
-                    <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                    </p>
+                    <p className="text-sm font-medium text-gray-600">Date Filter</p>
+                    <p className="text-2xl font-bold text-gray-900">{filteredReleases.length}</p>
+                    {showDatePicker && (
+                      <div className="absolute mt-2 bg-white border border-gray-300 rounded-lg shadow-lg p-2 z-10">
+                        <button 
+                          onClick={() => {setSelectedDateFilter('all'); setShowDatePicker(false);}} 
+                          className={`block w-full text-left px-3 py-2 rounded ${selectedDateFilter === 'all' ? 'bg-blue-100' : 'hover:bg-gray-100'}`}
+                        >
+                          All Time
+                        </button>
+                        <button 
+                          onClick={() => {setSelectedDateFilter('today'); setShowDatePicker(false);}} 
+                          className={`block w-full text-left px-3 py-2 rounded ${selectedDateFilter === 'today' ? 'bg-blue-100' : 'hover:bg-gray-100'}`}
+                        >
+                          Today
+                        </button>
+                        <button 
+                          onClick={() => {setSelectedDateFilter('week'); setShowDatePicker(false);}} 
+                          className={`block w-full text-left px-3 py-2 rounded ${selectedDateFilter === 'week' ? 'bg-blue-100' : 'hover:bg-gray-100'}`}
+                        >
+                          Past Week
+                        </button>
+                        <button 
+                          onClick={() => {setSelectedDateFilter('month'); setShowDatePicker(false);}} 
+                          className={`block w-full text-left px-3 py-2 rounded ${selectedDateFilter === 'month' ? 'bg-blue-100' : 'hover:bg-gray-100'}`}
+                        >
+                          Past Month
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -300,9 +388,11 @@ function App() {
                 >
                    {release.stage && (
                     <div 
-                      className={`absolute top-3 -right-2 px-3 py-1 text-xs font-bold rounded-sm shadow-lg transform rotate-3 border ${stages.find(s => s.name === release.stage)?.color}`}
+                      className={`absolute top-3 -right-2 px-3 py-1 text-xs font-bold rounded-sm shadow-lg transform rotate-3 border cursor-pointer ${stages.find(s => s.name === release.stage)?.color}`}
+                      onClick={() => removeStageAssignment(release.timestamp)}
+                      title="Click to remove stage"
                     >
-                      {release.stage}
+                      {release.stage} ×
                     </div>
                   )}
 
