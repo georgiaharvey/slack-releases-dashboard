@@ -29,6 +29,20 @@ const SlackReleasesDashboard = () => {
     return name.charAt(0).toUpperCase() + name.slice(1);
   };
 
+  // NEW: Helper function to validate and return a clean URL or null
+  const getValidUrl = (url) => {
+    if (!url || typeof url !== 'string') return null;
+    const trimmedUrl = url.trim();
+    if (trimmedUrl === '' || trimmedUrl.toLowerCase() === 'null') {
+      return null;
+    }
+    // Check if the string is a valid web URL
+    if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
+      return trimmedUrl;
+    }
+    return null;
+  };
+
   // --- Improved cleaning of Slack markup for display ---
   const cleanSlackText = (text) => {
     if (!text) return '';
@@ -63,7 +77,7 @@ const SlackReleasesDashboard = () => {
     // 7) Normalize bullet markers and put each on a new line for list formatting
     // This finds any bullet-like character and replaces it with a newline and a standard '• ' format.
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
-    
+     
     // NEW: Bold specific keywords
     const boldRegex = /(Internal release note|What(?:’|')s new|Why It Matters\?|What(?:’|')s next|Solution|Problem)/gi;
     cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
@@ -191,8 +205,8 @@ const SlackReleasesDashboard = () => {
             sender: formatSenderName(row[1]),
             mainMessage: cleanSlackText(messageText) || '',
             detailedNotes: cleanSlackText(detailedText) || '',
-            screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' ? row[4].trim() : null,
-            slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' ? row[5].trim() : null,
+            screenshotLink: getValidUrl(row[4]),
+            slackLink: getValidUrl(row[5]),
             extractedLinks: extractLinks((row[2] || '') + ' ' + (row[3] || ''))
           };
 
@@ -200,7 +214,12 @@ const SlackReleasesDashboard = () => {
           return item;
         }).filter(item => item !== null);
 
-        const sortedData = formattedData.sort((a, b) => {
+        // NEW: De-duplicate releases based on the unique timestamp
+        const uniqueMap = new Map();
+        formattedData.forEach(item => uniqueMap.set(item.timestamp, item));
+        const uniqueData = Array.from(uniqueMap.values());
+
+        const sortedData = uniqueData.sort((a, b) => {
           // sort by unix timestamp (if numeric) otherwise by date string
           const aNum = parseInt(a.timestamp, 10);
           const bNum = parseInt(b.timestamp, 10);
@@ -301,7 +320,7 @@ const SlackReleasesDashboard = () => {
 
             <div className="space-y-6">
               {filteredReleases.map((release) => (
-                <div key={release.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div key={release.timestamp} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow">
                   <div className="p-6">
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3">
