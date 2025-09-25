@@ -178,7 +178,28 @@ const SlackReleasesDashboard = () => {
         // First pass: collect all messages with their thread info
         const allMessages = rows.map((row, index) => {
           const timestamp = row[0] || '';
-          const threadTs = row[6] || timestamp; // Column 7 (index 6) for thread_ts, fallback to timestamp
+          // Try multiple columns for thread_ts - check columns 7, 8, 9 (indices 6, 7, 8)
+          let threadTs = row[6] || row[7] || row[8] || '';
+          
+          // If thread_ts is empty or 'null', use the message's own timestamp (it's a parent)
+          if (!threadTs || threadTs === 'null' || threadTs === '') {
+            threadTs = timestamp;
+          }
+          
+          // Debug logging to understand the data structure
+          if (index < 10) { // Log first 10 rows for debugging
+            console.log(`Row ${index + 1}:`, {
+              timestamp: timestamp,
+              threadTs: threadTs,
+              sender: row[1],
+              message: (row[2] || '').substring(0, 50) + '...',
+              col7: row[6],
+              col8: row[7],
+              col9: row[8]
+            });
+          }
+          
+          const isReply = threadTs !== timestamp && threadTs !== '';
           
           return {
             rowIndex: index,
@@ -189,7 +210,7 @@ const SlackReleasesDashboard = () => {
             detailedNotes: row[3] || '',
             screenshotLink: row[4] && row[4].trim() && row[4].trim() !== 'null' ? row[4].trim() : null,
             slackLink: row[5] && row[5].trim() && row[5].trim() !== 'null' ? row[5].trim() : null,
-            isReply: threadTs !== timestamp && threadTs !== ''
+            isReply: isReply
           };
         });
         
@@ -197,24 +218,34 @@ const SlackReleasesDashboard = () => {
         
         // Group messages by thread
         const threadGroups = {};
+        const orphanedReplies = [];
         
-        // First, add all parent messages
+        // First, add all parent messages (messages where timestamp equals thread_ts)
         allMessages.forEach(msg => {
           if (!msg.isReply) {
             threadGroups[msg.timestamp] = {
               parent: msg,
               replies: []
             };
+            console.log(`Parent message found: "${msg.mainMessage.substring(0, 40)}..." at timestamp ${msg.timestamp}`);
           }
         });
         
         // Then add replies to their threads
         allMessages.forEach(msg => {
-          if (msg.isReply && threadGroups[msg.threadTs]) {
-            threadGroups[msg.threadTs].replies.push(msg);
-            console.log(`Adding reply from ${msg.sender} to thread ${msg.threadTs}`);
+          if (msg.isReply) {
+            if (threadGroups[msg.threadTs]) {
+              threadGroups[msg.threadTs].replies.push(msg);
+              console.log(`Adding reply from ${msg.sender} to thread ${msg.threadTs}: "${msg.mainMessage.substring(0, 40)}..."`);
+            } else {
+              console.log(`Orphaned reply from ${msg.sender}: "${msg.mainMessage.substring(0, 40)}..." (looking for thread ${msg.threadTs})`);
+              orphanedReplies.push(msg);
+            }
           }
         });
+        
+        // Log summary
+        console.log(`Thread grouping complete: ${Object.keys(threadGroups).length} threads, ${orphanedReplies.length} orphaned replies`);
         
         // Format grouped data
         const formattedData = Object.values(threadGroups).map((thread, index) => {
@@ -234,21 +265,24 @@ const SlackReleasesDashboard = () => {
           if (thread.replies.length > 0) {
             // Add a separator before replies
             if (combinedDetailedNotes) {
-              combinedDetailedNotes += '\n\n---\n\n<b>Thread Replies:</b>';
+              combinedDetailedNotes += '\n\n<hr style="border: 0; height: 1px; background: #e5e7eb; margin: 16px 0;" />\n\n<b style="color: #6b7280; font-size: 14px;">📧 Thread Replies:</b>';
             } else {
-              combinedDetailedNotes = '<b>Thread Replies:</b>';
+              combinedDetailedNotes = '<b style="color: #6b7280; font-size: 14px;">📧 Thread Replies:</b>';
             }
             
-            // Add each reply
-            thread.replies.forEach(reply => {
+            // Add each reply with better formatting
+            thread.replies.forEach((reply, idx) => {
               const replySender = reply.sender;
               const replyMessage = cleanSlackText(reply.mainMessage);
               const replyDetails = cleanSlackText(reply.detailedNotes);
               
-              combinedDetailedNotes += `\n\n<b>${replySender}:</b>\n${replyMessage}`;
+              combinedDetailedNotes += `\n\n<div style="margin-left: 20px; padding-left: 12px; border-left: 3px solid #e5e7eb;">`;
+              combinedDetailedNotes += `<b style="color: #4b5563;">${replySender}:</b>\n`;
+              combinedDetailedNotes += `<span style="color: #374151;">${replyMessage}</span>`;
               if (replyDetails) {
-                combinedDetailedNotes += `\n${replyDetails}`;
+                combinedDetailedNotes += `\n<span style="color: #6b7280;">${replyDetails}</span>`;
               }
+              combinedDetailedNotes += `</div>`;
             });
           }
 
