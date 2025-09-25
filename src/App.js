@@ -114,7 +114,7 @@ function App() {
             screenshotLink: getValidUrl(row[4]),
             slackLink: getValidUrl(row[5]),
             threadParentId: row[6] || null,
-            stage: row[7] || null, // Assuming stage is in the 8th column (G)
+            stage: row[7] || null,
           };
         }).filter(item => item !== null);
 
@@ -176,9 +176,9 @@ function App() {
   }, [searchTerm, releases]);
 
   const stages = [
-    { name: 'Internal', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-    { name: 'GA', color: 'bg-green-100 text-green-800 border-green-200' },
-    { name: 'ENT Exclusion', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' }
+    { name: 'Internal', color: 'bg-blue-200 text-blue-800 border-blue-300' },
+    { name: 'GA', color: 'bg-green-200 text-green-800 border-green-300' },
+    { name: 'ENT Exclusion', color: 'bg-yellow-200 text-yellow-800 border-yellow-300' }
   ];
 
   return (
@@ -203,32 +203,16 @@ function App() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex-1">
-          {/* STAGES PANEL */}
-          <div className="mb-8 p-4 bg-white rounded-xl shadow-sm border border-slate-200">
-            <h3 className="text-lg font-semibold text-gray-800 mb-3">Stages</h3>
-            <div className="flex flex-wrap gap-3">
-              {stages.map(stage => (
-                <div 
-                  key={stage.name}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, stage.name)}
-                  onDragEnd={handleDragEnd}
-                  className={`px-3 py-1 rounded-md font-medium cursor-grab transition-opacity border ${stage.color} ${draggedStage === stage.name ? 'opacity-50' : 'opacity-100'}`}
-                >
-                  {stage.name}
-                </div>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 mt-3">Drag a stage and drop it onto a release card below.</p>
-          </div>
+        <div className="flex flex-col md:flex-row gap-8">
           
-          <div className="mb-6">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input type="text" placeholder="Search releases, messages, or team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"/>
+          {/* Main Content Area */}
+          <div className="flex-1">
+            <div className="mb-6">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input type="text" placeholder="Search releases, messages, or team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"/>
+              </div>
             </div>
-          </div>
 
             <div className="space-y-6">
               {filteredReleases.map((release) => (
@@ -298,6 +282,28 @@ function App() {
                 </div>
               ))}
             </div>
+          </div>
+          
+          {/* STAGES PANEL - MOVED TO THE RIGHT */}
+          <div className="w-full md:w-64">
+            <div className="sticky top-8 p-4 bg-white rounded-xl shadow-sm border border-slate-200">
+              <h3 className="text-lg font-semibold text-gray-800 mb-3">Stages</h3>
+              <p className="text-sm text-gray-500 mb-4">Drag a stage onto a release card.</p>
+              <div className="space-y-3">
+                {stages.map(stage => (
+                  <div 
+                    key={stage.name}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, stage.name)}
+                    onDragEnd={handleDragEnd}
+                    className={`p-4 rounded-lg font-semibold cursor-grab transition-opacity shadow-md hover:shadow-lg transform hover:-translate-y-1 ${stage.color} ${draggedStage === stage.name ? 'opacity-50 scale-105' : 'opacity-100'}`}
+                  >
+                    {stage.name}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
