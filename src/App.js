@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle } from 'lucide-react';
-import './App.css';
 
 function App() {
   const [releases, setReleases] = useState([]);
@@ -63,10 +62,6 @@ function App() {
   };
 
   useEffect(() => {
-    // ========================================================================
-    // FORCED DEMO DATA STARTS HERE
-    // ========================================================================
-
     const demoRelease1 = {
       timestamp: "1727177340000",
       sender: 'Kami Fournier',
@@ -97,16 +92,11 @@ function App() {
         replies: []
     };
 
-
     const allData = [demoRelease1, demoRelease2, demoRelease3];
     const finalData = allData.filter(release => !isTooShortToShow(release.mainMessage));
 
     setReleases(finalData);
     setFilteredReleases(finalData);
-    
-    // ========================================================================
-    // FORCED DEMO DATA ENDS HERE
-    // ========================================================================
   }, []);
 
   useEffect(() => {
