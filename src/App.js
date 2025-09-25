@@ -130,23 +130,30 @@ function App() {
           // Skip if already processed
           if (processedTimestamps.has(item.timestamp)) return;
           
-          // Check if this looks like a reply based on message content patterns
-          const isReplyPattern = item.mainMessage.includes('Why It Matters?') || 
-                                 item.mainMessage.includes("What's next") ||
-                                 item.mainMessage.includes('Questions.') ||
-                                 item.mainMessage.includes('Feedback');
+          // VERY SPECIFIC: Only treat as reply if it's ONLY "Why It Matters?" or similar follow-up
+          // AND from the same sender within a very short time window
+          const messageStart = item.mainMessage.trim().substring(0, 50);
+          const isDefiniteReply = (
+            messageStart.startsWith('Why It Matters?') || 
+            messageStart.startsWith("What's next") ||
+            messageStart.startsWith('thanks can see this') ||
+            messageStart.startsWith('Questions.')
+          ) && !item.mainMessage.includes('Internal release note') && !item.mainMessage.includes('rocket');
           
-          // Find potential parent - same sender, recent message (within 5 minutes)
+          // Find potential parent - same sender, very recent message (within 2 minutes)
           let foundParent = false;
-          if (isReplyPattern) {
-            for (const [parentTs, parent] of parentReleasesMap.entries()) {
-              const timeDiff = Math.abs(parseFloat(item.timestamp) - parseFloat(parentTs));
-              // If same sender and within 5 minutes (300 seconds)
-              if (parent.sender === item.sender && timeDiff < 300) {
+          if (isDefiniteReply) {
+            // Look for parent in reverse order (most recent first)
+            const sortedParents = Array.from(parentReleasesMap.entries()).sort((a, b) => parseFloat(b[0]) - parseFloat(a[0]));
+            
+            for (const [parentTs, parent] of sortedParents) {
+              const timeDiff = parseFloat(item.timestamp) - parseFloat(parentTs);
+              // If same sender and within 2 minutes (120 seconds) AFTER the parent
+              if (parent.sender === item.sender && timeDiff > 0 && timeDiff < 120) {
                 parent.replies.push(item);
                 processedTimestamps.add(item.timestamp);
                 foundParent = true;
-                console.log(`Grouped "${item.mainMessage.substring(0, 30)}..." as reply to "${parent.mainMessage.substring(0, 30)}..."`);
+                console.log(`Grouped "${item.mainMessage.substring(0, 30)}..." as update to "${parent.mainMessage.substring(0, 30)}..."`);
                 break;
               }
             }
@@ -156,6 +163,7 @@ function App() {
           if (!foundParent) {
             parentReleasesMap.set(item.timestamp, { ...item, replies: [] });
             processedTimestamps.add(item.timestamp);
+            console.log(`Added as parent release: "${item.mainMessage.substring(0, 50)}..." by ${item.sender}`);
           }
         });
         
@@ -175,7 +183,8 @@ function App() {
 
         const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
         
-        console.log(`Loaded ${sortedData.length} releases with ${sortedData.filter(r => r.replies.length > 0).length} having updates`);
+        console.log(`Loaded ${sortedData.length} releases total`);
+        console.log(`Releases with updates: ${sortedData.filter(r => r.replies.length > 0).length}`);
         setReleases(sortedData);
       } else {
         setReleases([]);
