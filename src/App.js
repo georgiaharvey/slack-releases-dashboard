@@ -72,7 +72,7 @@ function App() {
     cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
     cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
-    const boldRegex = /(Internal release note|What(?:'|')s new|Why It Matters\?|What(?:'|')s next|Solution|Problem)/gi;
+    const boldRegex = /(Internal release note|What(?:'|')s new|What's new|Why It Matters\?|What(?:'|')s next|Solution|Problem)/gi;
     cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
     return cleaned.split('\n').map(line => line.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   };
@@ -129,14 +129,17 @@ function App() {
             item.threadParentId = '1758713371';
           }
           
-          // Manual fix: Force row 22 (timestamp 1758810522) to show and add missing link
+          // Manual fix: Force row 22 (timestamp 1758810522) to show
           if (item.timestamp === '1758810522') {
-            // Add the missing API link
-            item.apiLink = 'https://developer.productboard.com/v2.0.0/reference/introduction';
             // Force it to not be filtered out by treating it as long enough
             if (item.mainMessage.length < 200) {
               item.mainMessage = item.mainMessage + " [Manual override: this release has been manually included]";
             }
+          }
+          
+          // Manual fix: Add missing API link to Ben Allen's release (row 18, timestamp 1758630185)
+          if (item.timestamp === '1758630185') {
+            item.apiLink = 'https://developer.productboard.com/v2.0.0/reference/introduction';
           }
 
           // FIXED: Only treat as reply if threadParentId is a timestamp (not a user ID)
@@ -247,7 +250,7 @@ function App() {
               </div>
             </div>
 
-            {/* ADDED: Statistics Cards */}
+            {/* Statistics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center">
@@ -255,6 +258,9 @@ function App() {
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">Total Releases</p>
                     <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Last updated: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -264,6 +270,9 @@ function App() {
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">Active Contributors</p>
                     <p className="text-2xl font-bold text-gray-900">{new Set(releases.map(r => r.sender)).size}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Unique team members
+                    </p>
                   </div>
                 </div>
               </div>
@@ -273,6 +282,9 @@ function App() {
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">This Month</p>
                     <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </p>
                   </div>
                 </div>
               </div>
