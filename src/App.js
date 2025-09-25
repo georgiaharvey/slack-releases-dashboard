@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle } from 'lucide-react';
-import './App.css';
 
 function App() {
   const [releases, setReleases] = useState([]);
