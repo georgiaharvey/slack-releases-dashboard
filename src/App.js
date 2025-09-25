@@ -109,6 +109,26 @@ const SlackReleasesDashboard = () => {
       hour: '2-digit', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short'
     });
   };
+
+  const handleGeminiQuery = async (message) => {
+    setGeminiLoading(true);
+    setChatMessages(prev => [...prev, { role: 'user', content: message }]);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const mockResponse = `Based on your release data, I can see ${releases.length} releases. What would you like to know about them?`;
+      setChatMessages(prev => [...prev, { role: 'assistant', content: mockResponse }]);
+    } catch (error) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
+    }
+    setGeminiLoading(false);
+    setCurrentMessage('');
+  };
+
+  const handleSendMessage = () => {
+    if (currentMessage.trim()) {
+      handleGeminiQuery(currentMessage.trim());
+    }
+  };
   
   const fetchGoogleSheetsData = async () => {
     setLoading(true);
@@ -194,6 +214,9 @@ const SlackReleasesDashboard = () => {
               <button onClick={fetchGoogleSheetsData} disabled={loading} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Refresh Data
               </button>
+              <button onClick={() => setShowChat(!showChat)} className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                <Sparkles className="w-4 h-4 mr-2" /> Ask Gemini
+              </button>
             </div>
           </div>
         </div>
@@ -201,7 +224,7 @@ const SlackReleasesDashboard = () => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex gap-8">
-          <div className="flex-1">
+          <div className={`flex-1 ${showChat ? 'mr-0' : ''}`}>
             <div className="mb-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -294,6 +317,17 @@ const SlackReleasesDashboard = () => {
               )}
             </div>
           </div>
+          
+          {showChat && (
+             <div className="w-96 bg-white rounded-xl shadow-sm border border-slate-200 h-fit">
+              <div className="p-4 border-b border-slate-200"><div className="flex items-center space-x-2"><Sparkles className="w-5 h-5 text-purple-600" /><h3 className="font-semibold text-gray-900">Ask Gemini</h3></div><p className="text-sm text-gray-600 mt-1">Ask questions about your releases</p></div>
+              <div className="h-96 overflow-y-auto p-4">
+                {chatMessages.length === 0 ? (<div className="text-center text-gray-500 mt-8"><Sparkles className="w-8 h-8 mx-auto mb-2 opacity-50" /><p>Start a conversation with Gemini about your release data!</p></div>) : (<div className="space-y-4">{chatMessages.map((msg, idx) => (<div key={idx} className={msg.role === 'user' ? 'ml-4' : 'mr-4'}><div className={`p-3 rounded-lg ${ msg.role === 'user' ? 'bg-blue-600 text-white ml-auto' : 'bg-gray-100 text-gray-900'}`}><p className="text-sm">{msg.content}</p></div></div>))}
+                {geminiLoading && (<div className="mr-4"><div className="bg-gray-100 text-gray-900 p-3 rounded-lg"><div className="flex items-center space-x-2"><div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div><div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div></div></div></div>)}</div>)}
+              </div>
+              <div className="p-4 border-t border-slate-200"><div className="flex space-x-2"><input type="text" value={currentMessage} onChange={(e) => setCurrentMessage(e.target.value)} placeholder="Ask about your releases..." disabled={geminiLoading} onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm" /><button onClick={handleSendMessage} disabled={geminiLoading || !currentMessage.trim()} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50">Send</button></div></div>
+            </div>
+          )}
         </div>
       </div>
     </div>
