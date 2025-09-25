@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle } from 'lucide-react';
+import { Search, MessageSquare, Calendar, User, Link, Image, Sparkles, RefreshCw, ChevronDown, MessageCircle, Info, X, CalendarDays } from 'lucide-react';
 
 function App() {
   const [releases, setReleases] = useState([]);
@@ -8,6 +8,10 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [openReplies, setOpenReplies] = useState({});
   const [draggedStage, setDraggedStage] = useState(null);
+  const [stageAssignments, setStageAssignments] = useState({});
+  const [showInfo, setShowInfo] = useState(false);
+  const [dateFilter, setDateFilter] = useState(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // State for Gemini Chat
   const [showChat, setShowChat] = useState(false);
@@ -15,9 +19,23 @@ function App() {
   const [currentMessage, setCurrentMessage] = useState('');
   const [geminiLoading, setGeminiLoading] = useState(false);
 
+  // Load stage assignments from localStorage on mount
+  useEffect(() => {
+    const savedStages = localStorage.getItem('stageAssignments');
+    if (savedStages) {
+      setStageAssignments(JSON.parse(savedStages));
+    }
+  }, []);
+
+  // Save stage assignments to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('stageAssignments', JSON.stringify(stageAssignments));
+  }, [stageAssignments]);
+
   // --- Drag and Drop Handlers ---
-  const handleDragStart = (e, stageName) => {
+  const handleDragStart = (e, stageName, fromRelease = null) => {
     e.dataTransfer.setData("stageName", stageName);
+    e.dataTransfer.setData("fromRelease", fromRelease || "");
     setDraggedStage(stageName);
   };
 
@@ -32,19 +50,77 @@ function App() {
   const handleDrop = (e, releaseTimestamp) => {
     e.preventDefault();
     const stageName = e.dataTransfer.getData("stageName");
+    const fromRelease = e.dataTransfer.getData("fromRelease");
     
-    setReleases(prevReleases => 
-      prevReleases.map(release => 
-        release.timestamp === releaseTimestamp 
-          ? { ...release, stage: stageName } 
-          : release
-      )
-    );
+    if (fromRelease) {
+      // Moving from another release - remove from old release
+      setStageAssignments(prev => {
+        const newAssignments = { ...prev };
+        delete newAssignments[fromRelease];
+        newAssignments[releaseTimestamp] = stageName;
+        return newAssignments;
+      });
+    } else {
+      // New assignment from stage panel
+      setStageAssignments(prev => ({
+        ...prev,
+        [releaseTimestamp]: stageName
+      }));
+    }
+    
     setDraggedStage(null);
+  };
+
+  const handleDropToStagePanel = (e) => {
+    e.preventDefault();
+    const fromRelease = e.dataTransfer.getData("fromRelease");
+    
+    if (fromRelease) {
+      // Remove stage from release
+      setStageAssignments(prev => {
+        const newAssignments = { ...prev };
+        delete newAssignments[fromRelease];
+        return newAssignments;
+      });
+    }
+    setDraggedStage(null);
+  };
+
+  const removeStage = (timestamp) => {
+    setStageAssignments(prev => {
+      const newAssignments = { ...prev };
+      delete newAssignments[timestamp];
+      return newAssignments;
+    });
   };
 
   const toggleReplies = (timestamp) => {
     setOpenReplies(prev => ({ ...prev, [timestamp]: !prev[timestamp] }));
+  };
+
+  // --- Date Filter Handlers ---
+  const handleDateFilter = (filterType) => {
+    const now = new Date();
+    let startDate = new Date();
+    
+    switch(filterType) {
+      case 'today':
+        startDate.setHours(0,0,0,0);
+        break;
+      case 'week':
+        startDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      default:
+        setDateFilter(null);
+        setShowDatePicker(false);
+        return;
+    }
+    
+    setDateFilter({ start: startDate.getTime() / 1000, type: filterType });
+    setShowDatePicker(false);
   };
 
   // --- Gemini Chat Handlers ---
@@ -56,14 +132,12 @@ function App() {
     setCurrentMessage('');
     setGeminiLoading(true);
 
-    // Mock Gemini API call
     await new Promise(resolve => setTimeout(resolve, 1500));
     const mockResponse = { role: 'assistant', content: `Based on the ${releases.length} releases, I can see a lot of activity. What specific insights are you looking for?` };
     
     setChatMessages(prev => [...prev, mockResponse]);
     setGeminiLoading(false);
   };
-
 
   const formatSenderName = (name) => {
     if (!name || typeof name !== 'string') return 'Unknown';
@@ -87,7 +161,7 @@ function App() {
     cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^|>]+)\|([^>]+)>/g, '$2');
     cleaned = cleaned.replace(/<((?:https?:\/\/|ftp:\/\/)[^>]+)>/g, '$1');
     cleaned = cleaned.replace(/<#\w+\|?[^>]*>/g, '');
-    cleaned = cleaned.replace(/<@[^>]+>/g, 'users'); // Replaced @user with users
+    cleaned = cleaned.replace(/<@[^>]+>/g, 'users');
     cleaned = cleaned.replace(/:[a-zA-Z0-9_+\-]+:/g, '');
     cleaned = cleaned.replace(/```[\s\S]*?```/g, '');
     cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
@@ -96,7 +170,7 @@ function App() {
     cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
     cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
-    const boldRegex = /(Internal release note|What(?:'|’)s new|Why It Matters\?|What(?:'|’)s next|Solution|Problem)/gi;
+    const boldRegex = /(Internal release note|What(?:'|')s new|Why It Matters\?|What(?:'|')s next|Solution|Problem)/gi;
     cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
     return cleaned.split('\n').map(line => line.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   };
@@ -138,7 +212,6 @@ function App() {
             screenshotLink: getValidUrl(row[4]),
             slackLink: getValidUrl(row[5]),
             threadParentId: row[6] || null,
-            stage: row[7] || null,
           };
         }).filter(item => item !== null);
 
@@ -188,19 +261,29 @@ function App() {
   }, []);
 
   useEffect(() => {
-    setFilteredReleases(releases);
-  }, [releases]);
-
-  useEffect(() => {
-    const filtered = releases.filter(release => {
-        const searchTermLower = searchTerm.toLowerCase();
+    let filtered = releases;
+    
+    // Apply date filter
+    if (dateFilter) {
+      filtered = filtered.filter(release => {
+        const releaseTime = parseFloat(release.timestamp);
+        return releaseTime >= dateFilter.start;
+      });
+    }
+    
+    // Apply search filter
+    if (searchTerm) {
+      const searchTermLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(release => {
         const inMainMessage = (release.mainMessage || '').toLowerCase().includes(searchTermLower);
         const inSender = (release.sender || '').toLowerCase().includes(searchTermLower);
         const inReplies = release.replies && release.replies.some(reply => (reply.mainMessage || '').toLowerCase().includes(searchTermLower));
         return inMainMessage || inSender || inReplies;
-    });
+      });
+    }
+    
     setFilteredReleases(filtered);
-  }, [searchTerm, releases]);
+  }, [searchTerm, releases, dateFilter]);
 
   const stages = [
     { name: 'Internal', color: 'bg-blue-200 text-blue-800 border-blue-300' },
@@ -238,15 +321,75 @@ function App() {
                 <input type="text" placeholder="Search releases, messages, or team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"/>
               </div>
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200"><div className="flex items-center"><MessageSquare className="w-8 h-8 text-blue-600" /><div className="ml-4"><p className="text-sm font-medium text-gray-600">Total Releases</p><p className="text-2xl font-bold text-gray-900">{releases.length}</p></div></div></div>
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200"><div className="flex items-center"><User className="w-8 h-8 text-green-600" /><div className="ml-4"><p className="text-sm font-medium text-gray-600">Active Contributors</p><p className="text-2xl font-bold text-gray-900">{new Set(releases.map(r => r.sender)).size}</p></div></div></div>
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200"><div className="flex items-center"><Calendar className="w-8 h-8 text-purple-600" /><div className="ml-4"><p className="text-sm font-medium text-gray-600">This Month</p><p className="text-2xl font-bold text-gray-900">{releases.length}</p></div></div></div>
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                <div className="flex items-center">
+                  <MessageSquare className="w-8 h-8 text-blue-600" />
+                  <div className="ml-4 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-gray-600">Total Releases</p>
+                      <button onClick={() => setShowInfo(!showInfo)} className="relative group">
+                        <Info className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-pointer" />
+                        {showInfo && (
+                          <div className="absolute z-10 left-0 top-6 bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap">
+                            Since November 17, 2025
+                          </div>
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                <div className="flex items-center">
+                  <User className="w-8 h-8 text-green-600" />
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Active Contributors</p>
+                    <p className="text-2xl font-bold text-gray-900">{new Set(releases.map(r => r.sender)).size}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 relative">
+                <button onClick={() => setShowDatePicker(!showDatePicker)} className="w-full h-full flex items-center hover:bg-slate-50 rounded-lg transition-colors">
+                  <CalendarDays className="w-8 h-8 text-purple-600" />
+                  <div className="ml-4 text-left">
+                    <p className="text-sm font-medium text-gray-600">
+                      {dateFilter ? `Filtered: ${dateFilter.type}` : 'This Month'}
+                    </p>
+                    <p className="text-2xl font-bold text-gray-900">{filteredReleases.length}</p>
+                  </div>
+                </button>
+                {showDatePicker && (
+                  <div className="absolute top-full mt-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-10">
+                    <button onClick={() => handleDateFilter('today')} className="block w-full text-left px-3 py-2 hover:bg-gray-100 rounded">Today</button>
+                    <button onClick={() => handleDateFilter('week')} className="block w-full text-left px-3 py-2 hover:bg-gray-100 rounded">Past Week</button>
+                    <button onClick={() => handleDateFilter('month')} className="block w-full text-left px-3 py-2 hover:bg-gray-100 rounded">Past Month</button>
+                    <button onClick={() => handleDateFilter(null)} className="block w-full text-left px-3 py-2 hover:bg-gray-100 rounded">All Time</button>
+                  </div>
+                )}
+              </div>
             </div>
+            
             <div className="space-y-6">
               {filteredReleases.map((release) => (
                 <div key={release.timestamp} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, release.timestamp)} className={`relative bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300 ${draggedStage ? 'border-dashed border-2 border-purple-400' : 'hover:shadow-md'}`}>
-                   {release.stage && (<div className={`absolute top-3 -right-2 px-3 py-1 text-xs font-bold rounded-sm shadow-lg transform rotate-3 border ${stages.find(s => s.name === release.stage)?.color}`}>{release.stage}</div>)}
+                   {stageAssignments[release.timestamp] && (
+                    <div 
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, stageAssignments[release.timestamp], release.timestamp)}
+                      onDragEnd={handleDragEnd}
+                      className={`absolute top-3 -right-2 px-3 py-1 text-xs font-bold rounded-sm shadow-lg transform rotate-3 border cursor-move ${stages.find(s => s.name === stageAssignments[release.timestamp])?.color}`}
+                    >
+                      {stageAssignments[release.timestamp]}
+                      <button onClick={(e) => { e.stopPropagation(); removeStage(release.timestamp); }} className="ml-2 text-red-600 hover:text-red-800">
+                        <X className="w-3 h-3 inline" />
+                      </button>
+                    </div>
+                  )}
                   <div className="p-6">
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3">
@@ -294,8 +437,13 @@ function App() {
               ))}
             </div>
           </div>
+          
           <div className="w-full md:w-64">
-            <div className="sticky top-8 p-4 bg-white rounded-xl shadow-sm border border-slate-200">
+            <div 
+              className="sticky top-8 p-4 bg-white rounded-xl shadow-sm border border-slate-200"
+              onDragOver={handleDragOver}
+              onDrop={handleDropToStagePanel}
+            >
               <h3 className="text-lg font-semibold text-gray-800 mb-3">Stages</h3>
               <p className="text-sm text-gray-500 mb-4">Drag a stage onto a release card.</p>
               <div className="space-y-3">
