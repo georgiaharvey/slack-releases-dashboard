@@ -88,10 +88,10 @@ function App() {
     });
   };
   
-  // FIXED: Changed from 200 to 150 characters minimum
+  // Changed back to 200 characters minimum as requested
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
-    return main.length > 0 && main.length < 150;
+    return main.length > 0 && main.length < 200;
   };
   
   const fetchGoogleSheetsData = async () => {
@@ -120,24 +120,42 @@ function App() {
           };
         }).filter(item => item !== null);
 
+        // Sort all items by timestamp to process in chronological order
+        allItems.sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp));
+
         const parentReleasesMap = new Map();
-        const replies = [];
+        const processedTimestamps = new Set();
 
         allItems.forEach(item => {
-          if (item.threadParentId && item.threadParentId !== item.timestamp) {
-            replies.push(item);
-          } else {
-            parentReleasesMap.set(item.timestamp, { ...item, replies: [] });
+          // Skip if already processed
+          if (processedTimestamps.has(item.timestamp)) return;
+          
+          // Check if this looks like a reply based on message content patterns
+          const isReplyPattern = item.mainMessage.includes('Why It Matters?') || 
+                                 item.mainMessage.includes("What's next") ||
+                                 item.mainMessage.includes('Questions.') ||
+                                 item.mainMessage.includes('Feedback');
+          
+          // Find potential parent - same sender, recent message (within 5 minutes)
+          let foundParent = false;
+          if (isReplyPattern) {
+            for (const [parentTs, parent] of parentReleasesMap.entries()) {
+              const timeDiff = Math.abs(parseFloat(item.timestamp) - parseFloat(parentTs));
+              // If same sender and within 5 minutes (300 seconds)
+              if (parent.sender === item.sender && timeDiff < 300) {
+                parent.replies.push(item);
+                processedTimestamps.add(item.timestamp);
+                foundParent = true;
+                console.log(`Grouped "${item.mainMessage.substring(0, 30)}..." as reply to "${parent.mainMessage.substring(0, 30)}..."`);
+                break;
+              }
+            }
           }
-        });
-
-        replies.forEach(reply => {
-          const parent = parentReleasesMap.get(reply.threadParentId);
-          if (parent) {
-            parent.replies.push(reply);
-          } else {
-            // If a reply's parent isn't found, treat the reply as its own parent message.
-            parentReleasesMap.set(reply.timestamp, { ...reply, replies: [] });
+          
+          // If not a reply or no parent found, treat as parent message
+          if (!foundParent) {
+            parentReleasesMap.set(item.timestamp, { ...item, replies: [] });
+            processedTimestamps.add(item.timestamp);
           }
         });
         
@@ -146,12 +164,18 @@ function App() {
             ...parent,
             mainMessage: cleanSlackText(parent.mainMessage),
             detailedNotes: cleanSlackText(parent.detailedNotes),
-            replies: parent.replies.map(r => ({...r, mainMessage: cleanSlackText(r.mainMessage)})).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
+            replies: parent.replies.map(r => ({
+              ...r, 
+              mainMessage: cleanSlackText(r.mainMessage),
+              detailedNotes: cleanSlackText(r.detailedNotes)
+            })).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
           }))
-          // This filter keeps everything that is NOT too short (i.e., >= 150 characters)
+          // Filter to keep messages >= 200 characters
           .filter(parent => !isTooShortToShow(parent.mainMessage));
 
         const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
+        
+        console.log(`Loaded ${sortedData.length} releases with ${sortedData.filter(r => r.replies.length > 0).length} having updates`);
         setReleases(sortedData);
       } else {
         setReleases([]);
@@ -288,25 +312,29 @@ function App() {
 
                     {release.replies && release.replies.length > 0 && (
                       <div className="mt-4 pt-4 border-t border-slate-100">
-                        <button onClick={() => toggleReplies(release.timestamp)} className="flex items-center justify-between w-full text-left text-sm font-medium text-purple-600 hover:text-purple-800">
+                        <button onClick={() => toggleReplies(release.timestamp)} className="flex items-center justify-between w-full text-left text-sm font-medium text-purple-600 hover:text-purple-800 transition-colors">
                           <span className="flex items-center">
                             <MessageCircle className="w-4 h-4 mr-2" />
-                            View {release.replies.length} {release.replies.length > 1 ? 'Updates' : 'Update'}
+                            <span className="font-semibold">Updates</span>
+                            <span className="ml-1 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">{release.replies.length}</span>
                           </span>
                           <ChevronDown className={`w-5 h-5 transition-transform ${openReplies[release.timestamp] ? 'rotate-180' : ''}`} />
                         </button>
                         {openReplies[release.timestamp] && (
-                          <div className="mt-4 pl-6 border-l-2 border-slate-200 space-y-6">
+                          <div className="mt-4 pl-6 border-l-2 border-purple-200 space-y-4 bg-purple-50 rounded-lg p-4 ml-2">
                             {release.replies.map(reply => (
-                              <div key={reply.timestamp}>
+                              <div key={reply.timestamp} className="bg-white rounded-lg p-4 shadow-sm">
                                 <div className="flex items-center space-x-3 mb-2">
-                                  <div className="w-8 h-8 bg-gradient-to-r from-slate-400 to-slate-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">{reply.sender.charAt(0).toUpperCase()}</div>
+                                  <div className="w-8 h-8 bg-gradient-to-r from-purple-400 to-purple-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">{reply.sender.charAt(0).toUpperCase()}</div>
                                   <div>
                                     <p className="font-semibold text-gray-800 text-sm">{reply.sender}</p>
                                     <p className="text-xs text-gray-500">{formatTimestamp(reply.timestamp)}</p>
                                   </div>
                                 </div>
                                 <div className="text-gray-700 leading-relaxed whitespace-pre-line break-words" dangerouslySetInnerHTML={{ __html: reply.mainMessage }} />
+                                {reply.detailedNotes && (
+                                  <div className="text-gray-600 text-sm mt-2 leading-relaxed whitespace-pre-line break-words" dangerouslySetInnerHTML={{ __html: reply.detailedNotes }} />
+                                )}
                               </div>
                             ))}
                           </div>
