@@ -37,17 +37,17 @@ function App() {
     setDraggedStage(null);
   };
 
-
   const toggleReplies = (timestamp) => {
     setOpenReplies(prev => ({ ...prev, [timestamp]: !prev[timestamp] }));
   };
 
+  // This function is now corrected
   const formatSenderName = (name) => {
     if (!name || typeof name !== 'string') return 'Unknown';
     if (name.includes('.')) {
       return name.split('.').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
     }
-    return name.charAt(0).toUpperCase() + part.slice(1);
+    return name.charAt(0).toUpperCase() + name.slice(1);
   };
 
   const cleanSlackText = (text) => {
@@ -86,7 +86,6 @@ function App() {
     setLoading(false);
   };
 
-  // Character count is now 200
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
     return main.length > 0 && main.length < 200;
