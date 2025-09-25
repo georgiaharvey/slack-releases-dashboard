@@ -7,7 +7,7 @@ const SlackReleasesDashboard = () => {
   console.log('Sheet ID:', process.env.REACT_APP_GOOGLE_SHEET_ID ? 'EXISTS' : 'MISSING');
   console.log('Worksheet:', process.env.REACT_APP_GOOGLE_WORKSHEET_NAME ? 'EXISTS' : 'MISSING');
 
-  const [releases, setReleases] = useState([]);
+  const [releases, setReleases] = useState([]); // This will now hold only parent releases with their nested replies
   const [filteredReleases, setFilteredReleases] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -81,10 +81,10 @@ const SlackReleasesDashboard = () => {
     return urlMatches.map(match => match.replace(/[<>]/g, ''));
   };
 
+  // This function now only applies to top-level "parent" messages
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
-    if (main.length > 0 && main.length < 200) return true;
-    return false;
+    return main.length > 0 && main.length < 200; // Only check length if there's any text
   };
 
   useEffect(() => {
@@ -96,8 +96,9 @@ const SlackReleasesDashboard = () => {
         const searchTermLower = searchTerm.toLowerCase();
         const inMainMessage = (release.mainMessage || '').toLowerCase().includes(searchTermLower);
         const inSender = (release.sender || '').toLowerCase().includes(searchTermLower);
+        const inDetailedNotes = (release.detailedNotes || '').toLowerCase().includes(searchTermLower); // Search in original detailed notes
         const inReplies = release.replies.some(reply => (reply.mainMessage || '').toLowerCase().includes(searchTermLower));
-        return inMainMessage || inSender || inReplies;
+        return inMainMessage || inSender || inDetailedNotes || inReplies;
     });
     setFilteredReleases(filtered);
   }, [searchTerm, releases]);
@@ -151,62 +152,76 @@ const SlackReleasesDashboard = () => {
       if (data.values && data.values.length > 1) {
         const [headers, ...rows] = data.values;
 
-        const allItems = rows.map((row, index) => {
-          if (!row[0]) return null; // Skip rows without a timestamp
-          // Assumes columns are: 0:ts, 1:sender, 2:mainMessage, 3:detailedNotes, 4:screenshot, 5:slackLink, 6:threadParentId
+        // Step 1: Process all raw rows into a consistent format
+        const allItems = rows.map(row => {
+          if (!row[0]) return null; // Skip rows without a timestamp (Slack's 'ts')
+
+          // Assuming column mapping:
+          // 0: Timestamp (Slack 'ts')
+          // 1: Sender (Profile Real Name)
+          // 2: Main Message (Text)
+          // 3: Detailed Notes (could be empty or contain additional info)
+          // 4: Screenshot Link
+          // 5: Slack Link (Permalink)
+          // 6: Thread Parent ID (Slack 'thread_ts' - crucial for replies)
+
           return {
-            timestamp: row[0],
+            timestamp: row[0], // Unique ID for each message (parent or reply)
             sender: formatSenderName(row[1] || 'Unknown'),
             mainMessage: row[2] || '',
-            detailedNotes: row[3] || '',
+            detailedNotes: row[3] || '', // This is the 'Detailed Notes' column in your sheet
             screenshotLink: getValidUrl(row[4]),
             slackLink: getValidUrl(row[5]),
-            threadParentId: row[6] || null,
+            threadParentId: row[6] || null, // Will be null for parent messages, filled for replies
+            originalRowIndex: rows.indexOf(row) // For debugging/reference
           };
         }).filter(item => item !== null);
 
-        // Separate parent messages and replies
-        const parentReleases = [];
+        const parentReleasesMap = new Map(); // Use a map to easily look up parent by timestamp
         const replies = [];
+
+        // Step 2: Separate into parent messages and replies
         allItems.forEach(item => {
-          if (item.threadParentId) {
+          if (item.threadParentId && item.threadParentId !== item.timestamp) { // If it has a parent ID AND it's not itself (which can happen for main messages)
             replies.push(item);
           } else {
-            parentReleases.push(item);
+            // These are potential parent messages or messages without a thread_ts
+            // We'll filter short ones later.
+            parentReleasesMap.set(item.timestamp, { ...item, replies: [] }); // Initialize replies array
           }
         });
-        
-        // Group replies by their parent's timestamp
-        const repliesMap = new Map();
+
+        // Step 3: Attach replies to their respective parent messages
         replies.forEach(reply => {
-          const parentId = reply.threadParentId;
-          if (!repliesMap.has(parentId)) {
-            repliesMap.set(parentId, []);
-          }
-          repliesMap.get(parentId).push(reply);
-        });
-
-        // Attach replies to their parent releases and clean the text
-        const mergedData = parentReleases.map(parent => {
-          const childReplies = (repliesMap.get(parent.timestamp) || []).map(reply => ({
+          const parent = parentReleasesMap.get(reply.threadParentId);
+          if (parent) {
+            // Clean reply message text here
+            const cleanedReply = {
               ...reply,
-              mainMessage: cleanSlackText(reply.mainMessage),
-          }));
-
-          return {
-            ...parent,
-            mainMessage: cleanSlackText(parent.mainMessage),
-            detailedNotes: cleanSlackText(parent.detailedNotes),
-            replies: childReplies.sort((a,b) => a.timestamp - b.timestamp),
-          };
+              mainMessage: cleanSlackText(reply.mainMessage) // Clean the reply's text
+            };
+            parent.replies.push(cleanedReply);
+          } else {
+            console.warn(`Orphaned reply found. Parent ID ${reply.threadParentId} not found for reply:`, reply);
+          }
         });
         
-        // De-duplicate parent releases just in case
-        const uniqueMap = new Map();
-        mergedData.forEach(item => uniqueMap.set(item.timestamp, item));
-        const uniqueData = Array.from(uniqueMap.values());
+        // Step 4: Final processing of parent messages
+        const processedParentReleases = Array.from(parentReleasesMap.values())
+          .map(parent => {
+            // Clean the main message and detailed notes for the parent
+            return {
+              ...parent,
+              mainMessage: cleanSlackText(parent.mainMessage),
+              detailedNotes: cleanSlackText(parent.detailedNotes),
+              // Sort replies by timestamp to ensure chronological order within a thread
+              replies: parent.replies.sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
+            };
+          })
+          .filter(parent => !isTooShortToShow(parent.mainMessage)); // Apply short message filter only to parents
 
-        const sortedData = uniqueData.sort((a, b) => b.timestamp - a.timestamp);
+        // Step 5: Sort all final parent releases by timestamp (newest first)
+        const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
         
         setReleases(sortedData);
         setFilteredReleases(sortedData);
@@ -302,7 +317,7 @@ const SlackReleasesDashboard = () => {
                         >
                           <span className="flex items-center">
                             <MessageCircle className="w-4 h-4 mr-2" />
-                            View {release.replies.length} {release.replies.length > 1 ? 'Replies' : 'Reply'}
+                            View {release.replies.length} {release.replies.length > 1 ? 'Updates/Feedback' : 'Update/Feedback'}
                           </span>
                           <ChevronDown className={`w-5 h-5 transition-transform ${openReplies[release.timestamp] ? 'rotate-180' : ''}`} />
                         </button>
@@ -323,6 +338,16 @@ const SlackReleasesDashboard = () => {
                                   className="text-gray-700 leading-relaxed whitespace-pre-line break-words"
                                   dangerouslySetInnerHTML={{ __html: reply.mainMessage }}
                                 />
+                                {reply.screenshotLink && (
+                                  <a href={reply.screenshotLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-blue-500 hover:text-blue-700 hover:underline text-sm mt-2">
+                                    <Image className="w-4 h-4 mr-1" /> View Reply Screenshot
+                                  </a>
+                                )}
+                                {reply.slackLink && !reply.screenshotLink && ( // Only show slack link if no screenshot for reply, to avoid clutter
+                                    <a href={reply.slackLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-purple-500 hover:text-purple-700 hover:underline text-sm mt-2 ml-2">
+                                        <Link className="w-4 h-4 mr-1" /> View Reply in Slack
+                                    </a>
+                                )}
                               </div>
                             ))}
                           </div>
