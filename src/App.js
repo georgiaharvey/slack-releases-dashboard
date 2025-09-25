@@ -72,7 +72,7 @@ function App() {
     cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
     cleaned = cleaned.replace(/\?\s*/g, '?\n\n');
     cleaned = cleaned.replace(/[ \t]*[-\*•·▪▫◦‣⁃][ \t]*/g, '\n• ');
-    const boldRegex = /(Internal release note|What(?:’|')s new|Why It Matters\?|What(?:’|')s next|Solution|Problem)/gi;
+    const boldRegex = /(Internal release note|What(?:'|')s new|Why It Matters\?|What(?:'|')s next|Solution|Problem)/gi;
     cleaned = cleaned.replace(boldRegex, '<b>$1</b>');
     return cleaned.split('\n').map(line => line.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   };
@@ -88,10 +88,10 @@ function App() {
     });
   };
   
-  // This function checks if a message is UNDER 200 characters.
+  // FIXED: Changed from 200 to 150 characters minimum
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
-    return main.length > 0 && main.length < 200;
+    return main.length > 0 && main.length < 150;
   };
   
   const fetchGoogleSheetsData = async () => {
@@ -148,7 +148,7 @@ function App() {
             detailedNotes: cleanSlackText(parent.detailedNotes),
             replies: parent.replies.map(r => ({...r, mainMessage: cleanSlackText(r.mainMessage)})).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
           }))
-          // This filter keeps everything that is NOT too short (i.e., >= 200 characters)
+          // This filter keeps everything that is NOT too short (i.e., >= 150 characters)
           .filter(parent => !isTooShortToShow(parent.mainMessage));
 
         const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
@@ -216,6 +216,37 @@ function App() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input type="text" placeholder="Search releases, messages, or team members..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"/>
+              </div>
+            </div>
+
+            {/* ADDED: Statistics Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                <div className="flex items-center">
+                  <MessageSquare className="w-8 h-8 text-blue-600" />
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Total Releases</p>
+                    <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                <div className="flex items-center">
+                  <User className="w-8 h-8 text-green-600" />
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Active Contributors</p>
+                    <p className="text-2xl font-bold text-gray-900">{new Set(releases.map(r => r.sender)).size}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+                <div className="flex items-center">
+                  <Calendar className="w-8 h-8 text-purple-600" />
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">This Month</p>
+                    <p className="text-2xl font-bold text-gray-900">{releases.length}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
