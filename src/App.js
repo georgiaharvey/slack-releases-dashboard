@@ -20,7 +20,7 @@ function App() {
   };
 
   const handleDragOver = (e) => {
-    e.preventDefault(); // This is necessary to allow dropping
+    e.preventDefault();
   };
 
   const handleDrop = (e, releaseTimestamp) => {
@@ -41,13 +41,20 @@ function App() {
     setOpenReplies(prev => ({ ...prev, [timestamp]: !prev[timestamp] }));
   };
 
-  // This function is now corrected
   const formatSenderName = (name) => {
     if (!name || typeof name !== 'string') return 'Unknown';
     if (name.includes('.')) {
       return name.split('.').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
     }
     return name.charAt(0).toUpperCase() + name.slice(1);
+  };
+
+  const getValidUrl = (url) => {
+    if (!url || typeof url !== 'string') return null;
+    const trimmedUrl = url.trim();
+    if (trimmedUrl === '' || trimmedUrl.toLowerCase() === 'null') return null;
+    if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) return trimmedUrl;
+    return null;
   };
 
   const cleanSlackText = (text) => {
@@ -72,7 +79,7 @@ function App() {
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
-    const date = new Date(parseInt(timestamp, 10));
+    const date = new Date(parseInt(timestamp, 10) * 1000);
     if (isNaN(date.getTime())) return "Invalid Date";
     return date.toLocaleString('en-US', {
       year: 'numeric', month: 'long', day: 'numeric',
@@ -80,45 +87,77 @@ function App() {
     });
   };
   
-  const fetchGoogleSheetsData = async () => {
-    setLoading(true);
-    alert("This would fetch live data from Google Sheets.");
-    setLoading(false);
-  };
-
   const isTooShortToShow = (messageText) => {
     const main = (messageText || '').trim();
     return main.length > 0 && main.length < 200;
   };
+  
+  const fetchGoogleSheetsData = async () => {
+    setLoading(true);
+    try {
+      const API_KEY = process.env.REACT_APP_GOOGLE_SHEETS_API_KEY;
+      const SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID;
+      const WORKSHEET = process.env.REACT_APP_GOOGLE_SHEET_NAME || 'september';
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${WORKSHEET}?key=${API_KEY}`;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.values && data.values.length > 1) {
+        const [headers, ...rows] = data.values;
+        const allItems = rows.map(row => {
+          if (!row[0]) return null;
+          return {
+            timestamp: row[0],
+            sender: formatSenderName(row[1] || 'Unknown'),
+            mainMessage: row[2] || '',
+            detailedNotes: row[3] || '',
+            screenshotLink: getValidUrl(row[4]),
+            slackLink: getValidUrl(row[5]),
+            threadParentId: row[6] || null,
+            stage: row[7] || null, // Assuming stage is in the 8th column (G)
+          };
+        }).filter(item => item !== null);
+
+        const parentReleasesMap = new Map();
+        const replies = [];
+
+        allItems.forEach(item => {
+          if (item.threadParentId && item.threadParentId !== item.timestamp) {
+            replies.push(item);
+          } else {
+            parentReleasesMap.set(item.timestamp, { ...item, replies: [] });
+          }
+        });
+
+        replies.forEach(reply => {
+          const parent = parentReleasesMap.get(reply.threadParentId);
+          if (parent) {
+            parent.replies.push(reply);
+          }
+        });
+        
+        const processedParentReleases = Array.from(parentReleasesMap.values())
+          .map(parent => ({
+            ...parent,
+            mainMessage: cleanSlackText(parent.mainMessage),
+            detailedNotes: cleanSlackText(parent.detailedNotes),
+            replies: parent.replies.map(r => ({...r, mainMessage: cleanSlackText(r.mainMessage)})).sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp))
+          }))
+          .filter(parent => !isTooShortToShow(parent.mainMessage));
+
+        const sortedData = processedParentReleases.sort((a, b) => parseFloat(b.timestamp) - parseFloat(a.timestamp));
+        setReleases(sortedData);
+      } else {
+        setReleases([]);
+      }
+    } catch (error) {
+      console.error('Error fetching Google Sheets data:', error);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    // Using demo data to ensure functionality is visible
-    const demoReleases = [
-      {
-        timestamp: "1727177340000",
-        sender: 'Kami Fournier',
-        mainMessage: cleanSlackText(`Timeframe visualization Grid column is now available internally...`),
-        stage: 'GA',
-        replies: []
-      },
-      {
-        timestamp: "1727200920000",
-        sender: 'Linda Czinner',
-        mainMessage: cleanSlackText(`We introduced a small improvement for the grouping and released it to GA 100%!...`),
-        stage: null,
-        replies: []
-      },
-      {
-        timestamp: "1758630185000",
-        sender: 'Ben Allen',
-        mainMessage: cleanSlackText(`Internal release note: APIv2 public beta...`),
-        stage: 'Internal',
-        replies: []
-      }
-    ];
-
-    const finalData = demoReleases.filter(release => !isTooShortToShow(release.mainMessage));
-    setReleases(finalData);
+    fetchGoogleSheetsData();
   }, []);
 
   useEffect(() => {
@@ -137,9 +176,9 @@ function App() {
   }, [searchTerm, releases]);
 
   const stages = [
-    { name: 'Internal', color: 'bg-blue-100 text-blue-800' },
-    { name: 'GA', color: 'bg-green-100 text-green-800' },
-    { name: 'ENT Exclusion', color: 'bg-yellow-100 text-yellow-800' }
+    { name: 'Internal', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+    { name: 'GA', color: 'bg-green-100 text-green-800 border-green-200' },
+    { name: 'ENT Exclusion', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' }
   ];
 
   return (
@@ -175,7 +214,7 @@ function App() {
                   draggable
                   onDragStart={(e) => handleDragStart(e, stage.name)}
                   onDragEnd={handleDragEnd}
-                  className={`px-3 py-1 rounded-full font-medium cursor-grab transition-opacity ${stage.color} ${draggedStage === stage.name ? 'opacity-50' : 'opacity-100'}`}
+                  className={`px-3 py-1 rounded-md font-medium cursor-grab transition-opacity border ${stage.color} ${draggedStage === stage.name ? 'opacity-50' : 'opacity-100'}`}
                 >
                   {stage.name}
                 </div>
@@ -197,9 +236,18 @@ function App() {
                   key={release.timestamp} 
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, release.timestamp)}
-                  className={`bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300 ${draggedStage ? 'border-dashed border-2 border-purple-400 scale-105' : 'hover:shadow-md'}`}
+                  className={`relative bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300 ${draggedStage ? 'border-dashed border-2 border-purple-400 scale-105' : 'hover:shadow-md'}`}
                 >
-                  <div className="p-6 relative">
+                   {/* STAGE TAG DISPLAY */}
+                   {release.stage && (
+                    <div 
+                      className={`absolute top-3 -right-2 px-3 py-1 text-xs font-bold rounded-sm shadow-lg transform rotate-3 border ${stages.find(s => s.name === release.stage)?.color}`}
+                    >
+                      {release.stage}
+                    </div>
+                  )}
+
+                  <div className="p-6">
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">{release.sender.charAt(0).toUpperCase()}</div>
@@ -208,12 +256,10 @@ function App() {
                           <p className="text-sm text-gray-500">{formatTimestamp(release.timestamp)}</p>
                         </div>
                       </div>
-                       {/* STAGE TAG DISPLAY */}
-                       {release.stage && (
-                        <div className={`absolute top-4 right-4 px-3 py-1 text-sm font-semibold rounded-full ${stages.find(s => s.name === release.stage)?.color}`}>
-                          {release.stage}
-                        </div>
-                      )}
+                      <div className="flex space-x-2">
+                        {release.screenshotLink && (<a href={release.screenshotLink} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200" title="View Screenshot"><Image className="w-5 h-5" /></a>)}
+                        {release.slackLink && (<a href={release.slackLink} target="_blank" rel="noopener noreferrer" className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors border border-gray-200" title="View in Slack"><Link className="w-5 h-5" /></a>)}
+                      </div>
                     </div>
 
                     <div className="space-y-3">
